@@ -9,29 +9,36 @@
  */
 package org.openmrs;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import org.hibernate.envers.Audited;
 import org.openmrs.attribute.AttributeType;
 import org.openmrs.attribute.BaseAttributeType;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.Table;
-
 /**
  * A user-defined extension to the {@link Visit} class.
- * @see AttributeType 
+ *
+ * @see AttributeType
  */
 @Entity
 @Table(name = "visit_attribute_type")
+@Audited
+@AttributeOverrides(value = {
+        @AttributeOverride(name = "description", column = @Column(name = "description", length = 1024)) })
 public class VisitAttributeType extends BaseAttributeType<Visit> implements AttributeType<Visit> {
 
 	@Id
 	@Column(name = "visit_attribute_type_id")
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer visitAttributeTypeId;
-	
+
 	/**
 	 * @see org.openmrs.OpenmrsObject#getId()
 	 */
@@ -39,7 +46,7 @@ public class VisitAttributeType extends BaseAttributeType<Visit> implements Attr
 	public Integer getId() {
 		return getVisitAttributeTypeId();
 	}
-	
+
 	/**
 	 * @see org.openmrs.OpenmrsObject#setId(java.lang.Integer)
 	 */
@@ -47,19 +54,19 @@ public class VisitAttributeType extends BaseAttributeType<Visit> implements Attr
 	public void setId(Integer id) {
 		setVisitAttributeTypeId(id);
 	}
-	
+
 	/**
 	 * @return the visitAttributeTypeId
 	 */
 	public Integer getVisitAttributeTypeId() {
 		return visitAttributeTypeId;
 	}
-	
+
 	/**
 	 * @param visitAttributeTypeId the visitAttributeTypeId to set
 	 */
 	public void setVisitAttributeTypeId(Integer visitAttributeTypeId) {
 		this.visitAttributeTypeId = visitAttributeTypeId;
 	}
-	
+
 }

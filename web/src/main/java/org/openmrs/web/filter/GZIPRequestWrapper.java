@@ -11,26 +11,25 @@ package org.openmrs.web.filter;
 
 import java.io.IOException;
 
-import javax.servlet.ServletInputStream;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletRequestWrapper;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 
 /**
  * Wraps Request for GZipFilter
- *
  */
 public class GZIPRequestWrapper extends HttpServletRequestWrapper {
-	
+
 	protected ServletInputStream stream;
-	
+
 	public GZIPRequestWrapper(HttpServletRequest request) throws IOException {
 		super(request);
 		stream = new GZIPRequestStream(request);
 	}
-	
+
 	@Override
 	public ServletInputStream getInputStream() throws IOException {
 		return stream;
 	}
-	
+
 }

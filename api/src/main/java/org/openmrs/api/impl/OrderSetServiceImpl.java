@@ -9,6 +9,7 @@
  */
 package org.openmrs.api.impl;
 
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -20,15 +21,20 @@ import org.openmrs.OrderSetAttributeType;
 import org.openmrs.OrderSetMember;
 import org.openmrs.api.APIException;
 import org.openmrs.api.OrderSetService;
+import org.openmrs.api.RefByUuid;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.OrderSetDAO;
 import org.openmrs.customdatatype.CustomDatatypeUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetService {
-	
+@Service("orderSetService")
+public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetService, RefByUuid {
+
+	@Autowired
 	protected OrderSetDAO dao;
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#setOrderSetDAO(org.openmrs.api.db.OrderSetDAO)
 	 */
@@ -36,13 +42,13 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	public void setOrderSetDAO(OrderSetDAO dao) {
 		this.dao = dao;
 	}
-	
+
 	@Override
 	@Transactional(readOnly = false)
 	public OrderSet saveOrderSet(OrderSet orderSet) throws APIException {
 		return saveOrderSetInternal(orderSet);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#retireOrderSet(OrderSet, String)
 	 */
@@ -57,7 +63,7 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 		}
 		return saveOrderSetInternal(orderSet);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#unretireOrderSet(OrderSet)
 	 */
@@ -66,7 +72,7 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	public OrderSet unretireOrderSet(OrderSet orderSet) throws APIException {
 		return saveOrderSetInternal(orderSet);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#saveOrderSet(OrderSet)
 	 */
@@ -87,12 +93,12 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 				orderSetMember.setDateRetired(new Date());
 			}
 		}
-		
+
 		// Why do we have to do this?
 		CustomDatatypeUtil.saveAttributesIfNecessary(orderSet);
 		return dao.save(orderSet);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#getOrderSets(boolean)
 	 */
@@ -101,7 +107,7 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	public List<OrderSet> getOrderSets(boolean includeRetired) throws APIException {
 		return dao.getOrderSets(includeRetired);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#getOrderSet(Integer)
 	 */
@@ -110,7 +116,7 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	public OrderSet getOrderSet(Integer orderSetId) throws APIException {
 		return dao.getOrderSetById(orderSetId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.OrderSetService#getOrderSetByUuid(String)
 	 */
@@ -171,8 +177,7 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	 */
 	@Override
 	@Transactional(readOnly = false)
-	public OrderSetAttributeType retireOrderSetAttributeType(OrderSetAttributeType orderSetAttributeType,
-			String reason) {
+	public OrderSetAttributeType retireOrderSetAttributeType(OrderSetAttributeType orderSetAttributeType, String reason) {
 		return dao.saveOrderSetAttributeType(orderSetAttributeType);
 	}
 
@@ -211,4 +216,29 @@ public class OrderSetServiceImpl extends BaseOpenmrsService implements OrderSetS
 	public OrderSetAttribute getOrderSetAttributeByUuid(String uuid) {
 		return dao.getOrderSetAttributeByUuid(uuid);
 	}
+
+	@Override
+	@Transactional(readOnly = true)
+	@SuppressWarnings("unchecked")
+	public <T> T getRefByUuid(Class<T> type, String uuid) {
+		if (OrderSetMember.class.equals(type)) {
+			return (T) getOrderSetMemberByUuid(uuid);
+		}
+		if (OrderSetAttribute.class.equals(type)) {
+			return (T) getOrderSetAttributeByUuid(uuid);
+		}
+		if (OrderSetAttributeType.class.equals(type)) {
+			return (T) getOrderSetAttributeTypeByUuid(uuid);
+		}
+		if (OrderSet.class.equals(type)) {
+			return (T) getOrderSetByUuid(uuid);
+		}
+		throw new APIException("Unsupported type for getRefByUuid: " + type != null ? type.getName() : "null");
+	}
+
+	@Override
+	public List<Class<?>> getRefTypes() {
+		return Arrays.asList(OrderSetMember.class, OrderSetAttribute.class, OrderSetAttributeType.class, OrderSet.class);
+	}
+
 }

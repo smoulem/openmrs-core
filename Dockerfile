@@ -7,11 +7,63 @@
 #	
 #	Copyright (C) OpenMRS Inc. OpenMRS is a registered trademark and the OpenMRS 
 #	graphic logo is a trademark of OpenMRS Inc.
+ARG BUILDPLATFORM
+ARG DEV_JDK=eclipse-temurin-21
+ARG RUNTIME_JDK=jdk21-temurin
+
+### Compile Stage (platform-agnostic)
+FROM --platform=$BUILDPLATFORM maven:3.9-$DEV_JDK AS compile
+
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /openmrs_core
+
+ENV OMRS_SDK_PLUGIN="org.openmrs.maven.plugins:openmrs-sdk-maven-plugin"
+ENV OMRS_SDK_PLUGIN_VERSION="5.11.0"
+
+COPY docker-pom.xml .
+
+# aether.dependencyCollector.impl=bf downloads poms in parallel in addition to jars, dependency download speed up by ~60%
+ARG MVN_SETTINGS="-s /usr/share/maven/ref/settings-docker.xml -Daether.dependencyCollector.impl=bf"
+
+# Setup and cache SDK
+RUN mvn $MVN_SETTINGS -f docker-pom.xml $OMRS_SDK_PLUGIN:$OMRS_SDK_PLUGIN_VERSION:setup-sdk -N -DbatchAnswers=n
+
+COPY pom.xml .
+COPY test/pom.xml test/
+COPY tools/pom.xml tools/
+COPY liquibase/pom.xml liquibase/
+COPY api/pom.xml api/
+COPY web/pom.xml web/
+COPY webapp/pom.xml webapp/
+COPY test-suite/pom.xml test-suite/
+COPY test-suite/module/pom.xml test-suite/module/
+COPY test-suite/module/api/pom.xml test-suite/module/api/
+COPY test-suite/module/omod/pom.xml test-suite/module/omod/
+COPY test-suite/performance/pom.xml test-suite/performance/
+
+# Install dependencies
+# Commenting out as it fails with:
+# `The following artifacts could not be resolved: org.openjfx:javafx-base:jar:linux-aarch64:17.0.14`
+# The version is not LTS thus linux-aarch64 is not available. 
+# I wasn't able to force a newer version with dependencyManagement for unknown reason.
+# Neither dependency:tree nor dependency:resolve-plugins lists this dependency. The excludeArtifactIds=javafx-base param
+# does not work due to https://github.com/apache/maven-dependency-plugin/pull/417 (not yet released)
+#RUN mvn $MVN_SETTINGS -B dependency:go-offline -P !default-tools.jar,!mac-tools.jar -DexcludeArtifactIds=javafx-base
+
+# Copy remaining files
+COPY . .
+
+# Append --build-arg MVN_ARGS='clean install' to change default maven arguments
+ARG MVN_ARGS='clean install -DskipTests'
+
+# Build the project
+RUN mvn $MVN_SETTINGS $MVN_ARGS
 
 ### Development Stage
-FROM maven:3.8-amazoncorretto-8 as dev
+FROM maven:3.9-$DEV_JDK AS dev
 
-RUN yum -y update && yum -y install tar gzip && yum clean all
+RUN apt-get update && apt-get install -y tar gzip git curl && rm -rf /var/lib/apt/lists/*
 
 # Setup Tini
 ARG TARGETARCH
@@ -25,78 +77,31 @@ RUN if [ "$TARGETARCH" = "arm64" ] ; then TINI_URL="${TINI_URL}-arm64" TINI_SHA=
     && chmod +x /usr/bin/tini 
 
 # Setup Tomcat for development
-ARG TOMCAT_VERSION=8.5.83
-ARG TOMCAT_SHA="57cbe9608a9c4e88135e5f5480812e8d57690d5f3f6c43a7c05fe647bddb7c3b684bf0fc0efebad399d05e80c6d20c43d5ecdf38ec58f123e6653e443f9054e3"
-ARG TOMCAT_URL="https://www.apache.org/dyn/closer.cgi?action=download&filename=tomcat/tomcat-8/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz"
+ARG TOMCAT_VERSION=11.0.11
+ARG TOMCAT_SHA="a26b2269530fd2fc834e9b1544962f6524cf87925de43b05ad050e66b5eaa76a4ad754a2c5fc4f851baf75a0ea1b0ed8f51082300393a4c35d8c2da0d7c535bd"
+ARG TOMCAT_URL="https://www.apache.org/dyn/closer.cgi?action=download&filename=tomcat/tomcat-11/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz"
 RUN curl -fL -o /tmp/apache-tomcat.tar.gz "$TOMCAT_URL" \
     && echo "${TOMCAT_SHA}  /tmp/apache-tomcat.tar.gz" | sha512sum -c \
-    && mkdir -p /usr/local/tomcat && gzip -d /tmp/apache-tomcat.tar.gz && tar -xvf /tmp/apache-tomcat.tar -C /usr/local/tomcat/ --strip-components=1 \
-    && rm -rf /tmp/apache-tomcat.tar.gz /usr/local/tomcat/webapps/*
+    && mkdir -p /usr/local/tomcat && gzip -d /tmp/apache-tomcat.tar.gz  \
+    && tar -xvf /tmp/apache-tomcat.tar -C /usr/local/tomcat/ --strip-components=1 \
+    && rm -rf /tmp/apache-tomcat.tar.gz /usr/local/tomcat/webapps/* 
 
 WORKDIR /openmrs_core
 
-ENV OPENMRS_SDK_PLUGIN="org.openmrs.maven.plugins:openmrs-sdk-maven-plugin:4.5.0"
-ENV OPENMRS_SDK_PLUGIN_VERSION="4.5.0"
-ENV MVN_ARGS_SETTINGS="-s /usr/share/maven/ref/settings-docker.xml"
+COPY --from=compile /usr/share/maven/ref /usr/share/maven/ref
 
-COPY checkstyle.xml checkstyle-suppressions.xml CONTRIBUTING.md findbugs-include.xml LICENSE license-header.txt \
- NOTICE.md README.md ruleset.xml SECURITY.md ./
-
-COPY pom.xml .
-
-# Setup and cache SDK
-RUN mvn $OPENMRS_SDK_PLUGIN:setup-sdk -N -DbatchAnswers=n $MVN_ARGS_SETTINGS
-
-# Store dependencies in /usr/share/maven/ref/repository for re-use when running
-# If mounting ~/.m2:/root/.m2 then the /usr/share/maven/ref content will be copied over from the image to /root/.m2
-RUN mvn --non-recursive dependency:go-offline $MVN_ARGS_SETTINGS
-
-# Copy remainig poms to satisfy dependencies
-COPY liquibase/pom.xml ./liquibase/
-COPY tools/pom.xml ./tools/
-COPY test/pom.xml ./test/
-COPY api/pom.xml ./api/
-COPY web/pom.xml ./web/
-COPY webapp/pom.xml ./webapp/
-	
-# Exclude tools as it fails trying to fetch tools.jar
-RUN mvn -pl !tools dependency:go-offline $MVN_ARGS_SETTINGS
-
-# Append --build-arg MVN_ARGS='install' to change default maven arguments
-# Build modules individually to benefit from caching
-ARG MVN_ARGS='install'
-
-# Build the parent project
-RUN mvn --non-recursive $MVN_ARGS_SETTINGS $MVN_ARGS
-
-# Build individually to benefit from caching
-COPY liquibase ./liquibase/
-RUN mvn -pl liquibase $MVN_ARGS_SETTINGS $MVN_ARGS
-
-COPY tools/ ./tools/
-RUN mvn -pl tools $MVN_ARGS_SETTINGS $MVN_ARGS
-
-COPY test/ ./test/
-RUN mvn -pl test $MVN_ARGS_SETTINGS $MVN_ARGS
-
-COPY api/ ./api/
-RUN mvn -pl api $MVN_ARGS_SETTINGS $MVN_ARGS
-
-COPY web/ ./web/
-RUN mvn -pl web $MVN_ARGS_SETTINGS $MVN_ARGS
-
-COPY webapp/ ./webapp/
-RUN mvn -pl webapp $MVN_ARGS_SETTINGS $MVN_ARGS
+COPY --from=compile /openmrs_core /openmrs_core/
 
 RUN mkdir -p /openmrs/distribution/openmrs_core/ \
-    && cp /openmrs_core/webapp/target/openmrs.war /openmrs/distribution/openmrs_core/openmrs.war
-
-# Copy in the start-up scripts
-COPY wait-for-it.sh startup-init.sh startup.sh startup-dev.sh /openmrs/
-RUN chmod +x /openmrs/wait-for-it.sh && chmod +x /openmrs/startup-init.sh && chmod +x /openmrs/startup.sh \
+    && cp -a /openmrs_core/webapp/target/openmrs.war /openmrs/distribution/openmrs_core/openmrs.war \
+    && cp -a /openmrs_core/wait-for-it.sh /openmrs_core/startup-init.sh /openmrs_core/startup.sh /openmrs_core/startup-dev.sh /openmrs/  \
+    && chmod +x /openmrs/wait-for-it.sh && chmod +x /openmrs/startup-init.sh && chmod +x /openmrs/startup.sh \
     && chmod +x /openmrs/startup-dev.sh 
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=5s --timeout=5s --start-period=1m --retries=3 \
+  CMD curl -f http://localhost:8080/openmrs/health/alive || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/mvn-entrypoint.sh"]
 
@@ -105,9 +110,9 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/mvn-entrypoint.sh"]
 CMD ["/openmrs/startup-dev.sh"]
 
 ### Production Stage
-FROM tomcat:8.5-jdk8-corretto
+FROM tomcat:11-$RUNTIME_JDK
 
-RUN yum -y update && yum -y install shadow-utils && yum clean all && rm -rf /usr/local/tomcat/webapps/*
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* && rm -rf /usr/local/tomcat/webapps/*
 
 # Setup Tini
 ARG TARGETARCH
@@ -118,19 +123,27 @@ ARG TINI_SHA_ARM64="07952557df20bfd2a95f9bef198b445e006171969499a1d361bd9e6f8e5e
 RUN if [ "$TARGETARCH" = "arm64" ] ; then TINI_URL="${TINI_URL}-arm64" TINI_SHA=${TINI_SHA_ARM64} ; fi \
     && curl -fsSL -o /usr/bin/tini ${TINI_URL} \
     && echo "${TINI_SHA}  /usr/bin/tini" | sha256sum -c \
-    && chmod +x /usr/bin/tini 
+    && chmod g+rx /usr/bin/tini 
 
 RUN sed -i '/Connector port="8080"/a URIEncoding="UTF-8" relaxedPathChars="[]|" relaxedQueryChars="[]|{}^&#x5c;&#x60;&quot;&lt;&gt;"' \
-    /usr/local/tomcat/conf/server.xml
+    /usr/local/tomcat/conf/server.xml \
+    && chmod -R g+rx /usr/local/tomcat \
+    && touch /usr/local/tomcat/bin/setenv.sh && chmod g+rw /usr/local/tomcat/bin/setenv.sh \
+    && chmod -R g+rw /usr/local/tomcat/webapps /usr/local/tomcat/logs /usr/local/tomcat/work /usr/local/tomcat/temp \
+    && chown -R 1001 /usr/local/tomcat/webapps
 
-RUN adduser openmrs && mkdir -p /openmrs/data/modules \
+RUN mkdir -p /openmrs/data/modules \
     && mkdir -p /openmrs/data/owa  \
     && mkdir -p /openmrs/data/configuration \
-    && chown -R openmrs /openmrs
+    && mkdir -p /openmrs/data/configuration_checksums \
+    && mkdir -p /openmrs/data/complex_obs \
+    && mkdir -p /openmrs/data/activemq-data \
+    && chmod -R g+rw /openmrs \
+    && chown -R 1001 /openmrs
     
 # Copy in the start-up scripts
-COPY wait-for-it.sh startup-init.sh startup.sh /openmrs/
-RUN chmod +x /openmrs/wait-for-it.sh && chmod +x /openmrs/startup-init.sh && chmod +x /openmrs/startup.sh
+COPY --from=dev /openmrs/wait-for-it.sh /openmrs/startup-init.sh /openmrs/startup.sh /openmrs/
+RUN chmod g+x /openmrs/wait-for-it.sh && chmod g+x /openmrs/startup-init.sh && chmod g+x /openmrs/startup.sh
 
 WORKDIR /openmrs
 
@@ -140,8 +153,14 @@ COPY --from=dev /openmrs/distribution/openmrs_core/openmrs.war /openmrs/distribu
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=5s --timeout=5s --start-period=1m --retries=3 \
+  CMD curl -f http://localhost:8080/openmrs/health/alive || exit 1
+
+# Run as non-root user using Bitnami approach, see e.g.
+# https://github.com/bitnami/containers/blob/6c8f10bbcf192ab4e575614491abf10697c46a3e/bitnami/tomcat/8.5/debian-11/Dockerfile#L54
+USER 1001
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # See startup-init.sh for all configurable environment variables
 CMD ["/openmrs/startup.sh"]
-

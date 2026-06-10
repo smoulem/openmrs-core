@@ -14,37 +14,41 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Order;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+
 import org.apache.commons.lang3.StringUtils;
-import org.hibernate.Criteria;
+import org.hibernate.Session;
 import org.hibernate.SessionFactory;
-import org.hibernate.criterion.DetachedCriteria;
-import org.hibernate.criterion.MatchMode;
-import org.hibernate.criterion.Order;
-import org.hibernate.criterion.Projections;
-import org.hibernate.criterion.Restrictions;
-import org.hibernate.criterion.Subqueries;
 import org.openmrs.Location;
 import org.openmrs.LocationAttribute;
 import org.openmrs.LocationAttributeType;
 import org.openmrs.LocationTag;
 import org.openmrs.api.db.DAOException;
 import org.openmrs.api.db.LocationDAO;
+import org.openmrs.parameter.LocationSearchCriteria;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
 
 /**
  * Hibernate location-related database functions
  */
+@Repository("locationDAO")
 public class HibernateLocationDAO implements LocationDAO {
-	
-	private SessionFactory sessionFactory;
-	
-	/**
-	 * @see org.openmrs.api.db.LocationDAO#setSessionFactory(org.hibernate.SessionFactory)
-	 */
-	@Override
-	public void setSessionFactory(SessionFactory sessionFactory) {
+
+	private final SessionFactory sessionFactory;
+
+	@Autowired
+	public HibernateLocationDAO(SessionFactory sessionFactory) {
 		this.sessionFactory = sessionFactory;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#saveLocation(org.openmrs.Location)
 	 */
@@ -60,299 +64,364 @@ public class HibernateLocationDAO implements LocationDAO {
 				}
 			}
 		}
-		
-		sessionFactory.getCurrentSession().saveOrUpdate(location);
-		return location;
+
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), location);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocation(java.lang.Integer)
 	 */
 	@Override
 	public Location getLocation(Integer locationId) {
-		return (Location) sessionFactory.getCurrentSession().get(Location.class, locationId);
+		return sessionFactory.getCurrentSession().get(Location.class, locationId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocation(java.lang.String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public Location getLocation(String name) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Location.class).add(
-		    Restrictions.eq("name", name));
-		
-		List<Location> locations = criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Location> cq = cb.createQuery(Location.class);
+		Root<Location> locationRoot = cq.from(Location.class);
+
+		cq.where(cb.equal(locationRoot.get("name"), name));
+
+		List<Location> locations = session.createQuery(cq).getResultList();
 		if (null == locations || locations.isEmpty()) {
 			return null;
 		}
 		return locations.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getAllLocations(boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Location> getAllLocations(boolean includeRetired) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Location.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Location> cq = cb.createQuery(Location.class);
+		Root<Location> locationRoot = cq.from(Location.class);
+
+		List<Order> orderList = new ArrayList<>();
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(locationRoot.get("retired")));
 		} else {
-			//push retired locations to the end of the returned list
-			criteria.addOrder(Order.asc("retired"));
+			orderList.add(cb.asc(locationRoot.get("retired")));
 		}
-		criteria.addOrder(Order.asc("name"));
-		return criteria.list();
+		orderList.add(cb.asc(locationRoot.get("name")));
+
+		cq.orderBy(orderList);
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#deleteLocation(org.openmrs.Location)
 	 */
 	@Override
 	public void deleteLocation(Location location) {
-		sessionFactory.getCurrentSession().delete(location);
+		sessionFactory.getCurrentSession().remove(location);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#saveLocation(org.openmrs.Location)
 	 */
 	@Override
 	public LocationTag saveLocationTag(LocationTag tag) {
-		sessionFactory.getCurrentSession().saveOrUpdate(tag);
-		return tag;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), tag);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationTag(java.lang.Integer)
 	 */
 	@Override
 	public LocationTag getLocationTag(Integer locationTagId) {
-		return (LocationTag) sessionFactory.getCurrentSession().get(LocationTag.class, locationTagId);
+		return sessionFactory.getCurrentSession().get(LocationTag.class, locationTagId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationTagByName(java.lang.String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public LocationTag getLocationTagByName(String tag) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(LocationTag.class).add(
-		    Restrictions.eq("name", tag));
-		
-		List<LocationTag> tags = criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<LocationTag> cq = cb.createQuery(LocationTag.class);
+		Root<LocationTag> root = cq.from(LocationTag.class);
+
+		cq.where(cb.equal(root.get("name"), tag));
+
+		List<LocationTag> tags = session.createQuery(cq).getResultList();
 		if (null == tags || tags.isEmpty()) {
 			return null;
 		}
 		return tags.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getAllLocationTags(boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<LocationTag> getAllLocationTags(boolean includeRetired) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(LocationTag.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<LocationTag> cq = cb.createQuery(LocationTag.class);
+		Root<LocationTag> root = cq.from(LocationTag.class);
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(root.get("retired")));
 		}
-		criteria.addOrder(Order.asc("name"));
-		return criteria.list();
+		cq.orderBy(cb.asc(root.get("name")));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationTags(String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<LocationTag> getLocationTags(String search) {
-		return sessionFactory.getCurrentSession().createCriteria(LocationTag.class)
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<LocationTag> cq = cb.createQuery(LocationTag.class);
+		Root<LocationTag> root = cq.from(LocationTag.class);
+
 		// 'ilike' case insensitive search
-		        .add(Restrictions.ilike("name", search, MatchMode.START)).addOrder(Order.asc("name")).list();
+		cq.where(cb.like(cb.lower(root.get("name")), MatchMode.START.toLowerCasePattern(search)));
+		cq.orderBy(cb.asc(root.get("name")));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#deleteLocationTag(org.openmrs.LocationTag)
 	 */
 	@Override
 	public void deleteLocationTag(LocationTag tag) {
-		sessionFactory.getCurrentSession().delete(tag);
+		sessionFactory.getCurrentSession().remove(tag);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationByUuid(java.lang.String)
 	 */
 	@Override
 	public Location getLocationByUuid(String uuid) {
-		return (Location) sessionFactory.getCurrentSession().createQuery("from Location l where l.uuid = :uuid").setString(
-		    "uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, Location.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationTagByUuid(java.lang.String)
 	 */
 	@Override
 	public LocationTag getLocationTagByUuid(String uuid) {
-		return (LocationTag) sessionFactory.getCurrentSession().createQuery("from LocationTag where uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, LocationTag.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getCountOfLocations(String, Boolean)
 	 */
 	@Override
 	public Long getCountOfLocations(String nameFragment, Boolean includeRetired) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Location.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+		Root<Location> root = cq.from(Location.class);
+
+		cq.select(cb.count(root));
+
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			predicates.add(cb.isFalse(root.get("retired")));
 		}
-		
+
 		if (StringUtils.isNotBlank(nameFragment)) {
-			criteria.add(Restrictions.ilike("name", nameFragment, MatchMode.START));
+			predicates.add(cb.like(cb.lower(root.get("name")), MatchMode.START.toLowerCasePattern(nameFragment)));
 		}
-		
-		criteria.setProjection(Projections.rowCount());
-		
-		return (Long) criteria.uniqueResult();
+
+		cq.where(cb.and(predicates.toArray(new Predicate[] {})));
+
+		return session.createQuery(cq).getSingleResult();
 	}
-	
+
 	/**
-	 * @see LocationDAO#getLocations(String, org.openmrs.Location, java.util.Map, boolean, Integer, Integer)
+	 * @see LocationDAO#getLocations(String, org.openmrs.Location, java.util.Map, boolean, Integer,
+	 *      Integer)
 	 */
 	@Override
 	public List<Location> getLocations(String nameFragment, Location parent,
 	        Map<LocationAttributeType, String> serializedAttributeValues, boolean includeRetired, Integer start,
 	        Integer length) {
-		
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Location.class);
-		
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Location> cq = cb.createQuery(Location.class);
+		Root<Location> locationRoot = cq.from(Location.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (StringUtils.isNotBlank(nameFragment)) {
-			criteria.add(Restrictions.ilike("name", nameFragment, MatchMode.START));
+			predicates.add(cb.like(cb.lower(locationRoot.get("name")), MatchMode.START.toLowerCasePattern(nameFragment)));
 		}
-		
+
 		if (parent != null) {
-			criteria.add(Restrictions.eq("parentLocation", parent));
+			predicates.add(cb.equal(locationRoot.get("parentLocation"), parent));
 		}
-		
+
 		if (serializedAttributeValues != null) {
-			HibernateUtil.addAttributeCriteria(criteria, serializedAttributeValues);
+			predicates.addAll(HibernateUtil.getAttributePredicate(cb, locationRoot, serializedAttributeValues));
 		}
-		
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			predicates.add(cb.isFalse(locationRoot.get("retired")));
 		}
-		
-		criteria.addOrder(Order.asc("name"));
+
+		cq.where(cb.and(predicates.toArray(new Predicate[] {})));
+		cq.orderBy(cb.asc(locationRoot.get("name")));
+
+		TypedQuery<Location> query = session.createQuery(cq);
+
 		if (start != null) {
-			criteria.setFirstResult(start);
+			query.setFirstResult(start);
 		}
 		if (length != null && length > 0) {
-			criteria.setMaxResults(length);
+			query.setMaxResults(length);
 		}
-		
-		return criteria.list();
+
+		return query.getResultList();
 	}
-	
+
 	/**
 	 * @see LocationDAO#getRootLocations(boolean)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<Location> getRootLocations(boolean includeRetired) throws DAOException {
-		
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Location.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Location> cq = cb.createQuery(Location.class);
+		Root<Location> locationRoot = cq.from(Location.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			predicates.add(cb.isFalse(locationRoot.get("retired")));
 		}
-		
-		criteria.add(Restrictions.isNull("parentLocation"));
-		
-		criteria.addOrder(Order.asc("name"));
-		return criteria.list();
+
+		predicates.add(cb.isNull(locationRoot.get("parentLocation")));
+
+		cq.where(predicates.toArray(new Predicate[] {}));
+		cq.orderBy(cb.asc(locationRoot.get("name")));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getAllLocationAttributeTypes()
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<LocationAttributeType> getAllLocationAttributeTypes() {
-		return sessionFactory.getCurrentSession().createCriteria(LocationAttributeType.class).list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<LocationAttributeType> cq = cb.createQuery(LocationAttributeType.class);
+		cq.from(LocationAttributeType.class);
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationAttributeType(java.lang.Integer)
 	 */
 	@Override
 	public LocationAttributeType getLocationAttributeType(Integer id) {
-		return (LocationAttributeType) sessionFactory.getCurrentSession().get(LocationAttributeType.class, id);
+		return sessionFactory.getCurrentSession().get(LocationAttributeType.class, id);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationAttributeTypeByUuid(java.lang.String)
 	 */
 	@Override
 	public LocationAttributeType getLocationAttributeTypeByUuid(String uuid) {
-		return (LocationAttributeType) sessionFactory.getCurrentSession().createCriteria(LocationAttributeType.class).add(
-		    Restrictions.eq("uuid", uuid)).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, LocationAttributeType.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#saveLocationAttributeType(org.openmrs.LocationAttributeType)
 	 */
 	@Override
 	public LocationAttributeType saveLocationAttributeType(LocationAttributeType locationAttributeType) {
-		sessionFactory.getCurrentSession().saveOrUpdate(locationAttributeType);
-		return locationAttributeType;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), locationAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#deleteLocationAttributeType(org.openmrs.LocationAttributeType)
 	 */
 	@Override
 	public void deleteLocationAttributeType(LocationAttributeType locationAttributeType) {
-		sessionFactory.getCurrentSession().delete(locationAttributeType);
+		sessionFactory.getCurrentSession().remove(locationAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationAttributeByUuid(java.lang.String)
 	 */
 	@Override
 	public LocationAttribute getLocationAttributeByUuid(String uuid) {
-		return (LocationAttribute) sessionFactory.getCurrentSession().createCriteria(LocationAttribute.class).add(
-		    Restrictions.eq("uuid", uuid)).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, LocationAttribute.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationAttributeTypeByName(java.lang.String)
 	 */
 	@Override
 	public LocationAttributeType getLocationAttributeTypeByName(String name) {
-		return (LocationAttributeType) sessionFactory.getCurrentSession().createCriteria(LocationAttributeType.class).add(
-		    Restrictions.eq("name", name)).uniqueResult();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<LocationAttributeType> cq = cb.createQuery(LocationAttributeType.class);
+		Root<LocationAttributeType> root = cq.from(LocationAttributeType.class);
+
+		cq.where(cb.equal(root.get("name"), name));
+
+		return session.createQuery(cq).uniqueResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.LocationDAO#getLocationsHavingAllTags(java.util.List)
 	 */
 	@Override
 	public List<Location> getLocationsHavingAllTags(List<LocationTag> tags) {
 		tags.removeAll(Collections.singleton(null));
-		
-		DetachedCriteria numberOfMatchingTags = DetachedCriteria.forClass(Location.class, "alias").createAlias("alias.tags",
-		    "locationTag").add(Restrictions.in("locationTag.locationTagId", getLocationTagIds(tags))).setProjection(
-		    Projections.rowCount()).add(Restrictions.eqProperty("alias.locationId", "outer.locationId"));
-		
-		return sessionFactory.getCurrentSession().createCriteria(Location.class, "outer").add(
-		    Restrictions.eq("retired", false)).add(Subqueries.eq(Long.valueOf(tags.size()), numberOfMatchingTags)).list();
+
+		List<Integer> tagIds = getLocationTagIds(tags);
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+
+		CriteriaQuery<Location> mainQuery = cb.createQuery(Location.class);
+		Root<Location> locationRoot = mainQuery.from(Location.class);
+
+		// Create a subquery to count matching tags
+		Subquery<Long> tagCountSubquery = mainQuery.subquery(Long.class);
+		Root<Location> subRoot = tagCountSubquery.from(Location.class);
+		Join<Location, LocationTag> tagsJoin = subRoot.join("tags");
+
+		tagCountSubquery.select(cb.count(subRoot)).where(cb.and(tagsJoin.get("locationTagId").in(tagIds),
+		    cb.equal(subRoot.get("locationId"), locationRoot.get("locationId"))));
+
+		mainQuery.select(locationRoot).where(
+		    cb.and(cb.isFalse(locationRoot.get("retired")), cb.equal(cb.literal((long) tags.size()), tagCountSubquery)));
+
+		return session.createQuery(mainQuery).getResultList();
 	}
-	
+
 	/**
 	 * Extract locationTagIds from the list of LocationTag objects provided.
 	 *
-	 * @param tags
-	 * @return
+	 * @param tags A list of LocationTag objects from which to extract the location tag IDs. This list
+	 *            should not be null.
+	 * @return A List of Integer representing the IDs of the provided LocationTag objects. Returns an
+	 *         empty list if the input list is empty.
 	 */
 	private List<Integer> getLocationTagIds(List<LocationTag> tags) {
 		List<Integer> locationTagIds = new ArrayList<>();
@@ -360,5 +429,64 @@ public class HibernateLocationDAO implements LocationDAO {
 			locationTagIds.add(tag.getLocationTagId());
 		}
 		return locationTagIds;
+	}
+
+	/**
+	 * @see LocationDAO#getLocations(LocationSearchCriteria)
+	 */
+	@Override
+	public List<Location> getLocations(LocationSearchCriteria criteria) {
+		Session session = sessionFactory.getCurrentSession();
+
+		List<Integer> descendantIds = null;
+		if (criteria.getDescendantOfLocation() != null) {
+			String retiredFilter = criteria.getIncludeRetired() ? "" : " AND retired = false";
+			String cteSql = "WITH RECURSIVE descendants (location_id) AS ("
+			        + " SELECT location_id FROM location WHERE parent_location = :locationId" + retiredFilter
+			        + " UNION ALL SELECT l.location_id FROM location l"
+			        + " INNER JOIN descendants d ON l.parent_location = d.location_id" + retiredFilter
+			        + ") SELECT location_id FROM descendants";
+			descendantIds = session.createNativeQuery(cteSql, Integer.class)
+			        .setParameter("locationId", criteria.getDescendantOfLocation().getLocationId()).list();
+			if (descendantIds.isEmpty()) {
+				return Collections.emptyList();
+			}
+		}
+
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Location> cq = cb.createQuery(Location.class);
+		Root<Location> root = cq.from(Location.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
+		if (!criteria.getIncludeRetired()) {
+			predicates.add(cb.isFalse(root.get("retired")));
+		}
+
+		if (descendantIds != null) {
+			predicates.add(root.get("locationId").in(descendantIds));
+		}
+
+		if (StringUtils.isNotBlank(criteria.getNameFragment())) {
+			predicates.add(
+			    cb.like(cb.lower(root.get("name")), MatchMode.START.toLowerCasePattern(criteria.getNameFragment())));
+		}
+
+		if (criteria.getLocationTags() != null && !criteria.getLocationTags().isEmpty()) {
+			List<Integer> tagIds = getLocationTagIds(new ArrayList<>(criteria.getLocationTags()));
+			if (!tagIds.isEmpty()) {
+				Join<Location, LocationTag> tagsJoin = root.join("tags");
+				predicates.add(tagsJoin.get("locationTagId").in(tagIds));
+				cq.groupBy(root);
+				if (criteria.getTagMatchMode() == LocationSearchCriteria.TagMatchMode.ALL) {
+					cq.having(cb.equal(cb.count(tagsJoin), (long) tagIds.size()));
+				}
+			}
+		}
+
+		cq.where(cb.and(predicates.toArray(new Predicate[0])));
+		cq.orderBy(cb.asc(root.get("name")));
+
+		return session.createQuery(cq).getResultList();
 	}
 }

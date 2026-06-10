@@ -16,9 +16,9 @@ package org.openmrs.api;
  */
 
 public class ConceptStopWordException extends APIException {
-	
+
 	private static final long serialVersionUID = 133352366232223L;
-	
+
 	/**
 	 * Constructor to give the user a message
 	 *
@@ -27,10 +27,10 @@ public class ConceptStopWordException extends APIException {
 	public ConceptStopWordException(String message) {
 		super(message);
 	}
-	
+
 	/**
-	 * Convenience constructor to give the user a message and to chain
-	 * this exception with a parent exception.
+	 * Convenience constructor to give the user a message and to chain this exception with a parent
+	 * exception.
 	 *
 	 * @param message the String to show to the user as to why the concept stop word service failed
 	 * @param cause the parent exception
@@ -38,5 +38,5 @@ public class ConceptStopWordException extends APIException {
 	public ConceptStopWordException(String message, Throwable cause) {
 		super(message, cause);
 	}
-	
+
 }

@@ -9,122 +9,126 @@
  */
 package org.openmrs.notification.db.hibernate;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
-import org.hibernate.Criteria;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+
+import org.hibernate.Session;
 import org.hibernate.SessionFactory;
-import org.hibernate.criterion.Order;
-import org.hibernate.criterion.Restrictions;
 import org.openmrs.User;
 import org.openmrs.api.db.DAOException;
+import org.openmrs.api.db.hibernate.HibernateUtil;
 import org.openmrs.notification.Alert;
 import org.openmrs.notification.db.AlertDAO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
 
 /**
  * Hibernate specific implementation of the
  */
+@Repository("alertDAO")
 public class HibernateAlertDAO implements AlertDAO {
-	
+
 	private static final Logger log = LoggerFactory.getLogger(HibernateAlertDAO.class);
-	
-	/**
-	 * Hibernate session factory
-	 */
-	private SessionFactory sessionFactory;
-	
-	public HibernateAlertDAO() {
-	}
-	
-	/**
-	 * Set session factory
-	 *
-	 * @param sessionFactory
-	 */
-	public void setSessionFactory(SessionFactory sessionFactory) {
+
+	private final SessionFactory sessionFactory;
+
+	@Autowired
+	public HibernateAlertDAO(SessionFactory sessionFactory) {
 		this.sessionFactory = sessionFactory;
 	}
-	
+
 	/**
 	 * @see org.openmrs.notification.db.AlertDAO#saveAlert(org.openmrs.notification.Alert)
 	 */
 	@Override
 	public Alert saveAlert(Alert alert) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(alert);
-		return alert;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), alert);
 	}
-	
+
 	/**
 	 * @see org.openmrs.notification.db.AlertDAO#getAlert(java.lang.Integer)
 	 */
 	@Override
 	public Alert getAlert(Integer alertId) throws DAOException {
-		return (Alert) sessionFactory.getCurrentSession().get(Alert.class, alertId);
+		return sessionFactory.getCurrentSession().get(Alert.class, alertId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.notification.db.AlertDAO#deleteAlert(org.openmrs.notification.Alert)
 	 */
 	@Override
 	public void deleteAlert(Alert alert) throws DAOException {
-		sessionFactory.getCurrentSession().delete(alert);
+		sessionFactory.getCurrentSession().remove(alert);
 	}
-	
+
 	/**
 	 * @see org.openmrs.notification.AlertService#getAllAlerts(boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Alert> getAllAlerts(boolean includeExpired) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(Alert.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Alert> cq = cb.createQuery(Alert.class);
+		Root<Alert> root = cq.from(Alert.class);
+
 		// exclude the expired alerts unless requested
 		if (!includeExpired) {
-			crit.add(Restrictions.or(Restrictions.isNull("dateToExpire"), Restrictions.gt("dateToExpire", new Date())));
+			cq.where(cb.or(cb.isNull(root.get("dateToExpire")), cb.greaterThan(root.get("dateToExpire"), new Date())));
 		}
-		
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.notification.db.AlertDAO#getAlerts(org.openmrs.User, boolean, boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Alert> getAlerts(User user, boolean includeRead, boolean includeExpired) throws DAOException {
 		log.debug("Getting alerts for user " + user + " read? " + includeRead + " expired? " + includeExpired);
-		
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(Alert.class, "alert");
-		
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Alert> cq = cb.createQuery(Alert.class);
+		Root<Alert> root = cq.from(Alert.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (user != null && user.getUserId() != null) {
-			crit.createCriteria("recipients", "recipient");
-			crit.add(Restrictions.eq("recipient.recipient", user));
+			predicates.add(cb.equal(root.join("recipients").get("recipientId"), user.getUserId()));
 		} else {
 			// getting here means we passed in no user or a blank user.
 			// a null recipient column means get stuff for the anonymous user
-			
+
 			// returning an empty list for now because the above throws an error.
 			// we may need to remodel how recipients are handled to get anonymous users alerts
 			return Collections.emptyList();
 		}
-		
+
 		// exclude the expired alerts unless requested
 		if (!includeExpired) {
-			crit.add(Restrictions.or(Restrictions.isNull("dateToExpire"), Restrictions.gt("dateToExpire", new Date())));
+			Predicate dateToExpireIsNull = cb.isNull(root.get("dateToExpire"));
+			Predicate dateToExpireIsGreater = cb.greaterThan(root.get("dateToExpire"), new Date());
+			predicates.add(cb.or(dateToExpireIsNull, dateToExpireIsGreater));
 		}
-		
+
 		// exclude the read alerts unless requested
 		if (!includeRead && user.getUserId() != null) {
-			crit.add(Restrictions.eq("alertRead", false));
-			crit.add(Restrictions.eq("recipient.alertRead", false));
+			predicates.add(cb.isFalse(root.get("alertRead")));
+			predicates.add(cb.isFalse(root.join("recipients").get("alertRead")));
 		}
-		
-		crit.addOrder(Order.desc("dateChanged"));
-		
-		return crit.list();
+
+		cq.where(predicates.toArray(new Predicate[] {})).orderBy(cb.desc(root.get("dateChanged")));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 }

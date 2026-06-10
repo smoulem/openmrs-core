@@ -12,21 +12,22 @@ package org.openmrs.customdatatype;
 import org.openmrs.api.APIException;
 
 /**
- * Exception thrown when trying to convert between a serialized attribute value and its typed value, if the
- * serialized String is not a legal value for the given handler.
+ * Exception thrown when trying to convert between a serialized attribute value and its typed value,
+ * if the serialized String is not a legal value for the given handler.
+ *
  * @since 1.9
  */
 public class InvalidCustomValueException extends APIException {
-	
+
 	private static final long serialVersionUID = 1L;
-	
+
 	/**
 	 * @param message
 	 */
 	public InvalidCustomValueException(String message) {
 		super(message);
 	}
-	
+
 	/**
 	 * @param message
 	 * @param cause
@@ -34,5 +35,5 @@ public class InvalidCustomValueException extends APIException {
 	public InvalidCustomValueException(String message, Throwable cause) {
 		super(message, cause);
 	}
-	
+
 }

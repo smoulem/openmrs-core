@@ -9,17 +9,9 @@
  */
 package org.openmrs.obs;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 import java.io.IOException;
-import java.nio.file.Path;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.openmrs.GlobalProperty;
 import org.openmrs.Obs;
 import org.openmrs.api.AdministrationService;
@@ -28,77 +20,110 @@ import org.openmrs.test.jupiter.BaseContextSensitiveTest;
 import org.openmrs.util.OpenmrsConstants;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 public class BinaryDataHandlerTest extends BaseContextSensitiveTest {
-	
+
 	@Autowired
 	private AdministrationService adminService;
 
-	@TempDir
-	public Path complexObsTestFolder;
-
+	@Autowired
 	BinaryDataHandler handler;
 
-	@BeforeEach
-	public void setUp() {
-		handler = new BinaryDataHandler();
+	@Test
+	public void shouldReturnSupportedViews() {
+		String[] actualViews = handler.getSupportedViews();
+		String[] expectedViews = { ComplexObsHandler.RAW_VIEW };
+
+		assertArrayEquals(actualViews, expectedViews);
 	}
 
 	@Test
-    public void shouldReturnSupportedViews() {
-        String[] actualViews = handler.getSupportedViews();
-        String[] expectedViews = { ComplexObsHandler.RAW_VIEW };
+	public void shouldSupportRawView() {
 
-        assertArrayEquals(actualViews, expectedViews);
-    }
+		assertTrue(handler.supportsView(ComplexObsHandler.RAW_VIEW));
+	}
 
-    @Test
-    public void shouldSupportRawView() {
-        
-        assertTrue(handler.supportsView(ComplexObsHandler.RAW_VIEW));
-    }
-
-    @Test
-    public void shouldNotSupportOtherViews() {
-        
-        assertFalse(handler.supportsView(ComplexObsHandler.HTML_VIEW));
-        assertFalse(handler.supportsView(ComplexObsHandler.PREVIEW_VIEW));
-        assertFalse(handler.supportsView(ComplexObsHandler.TEXT_VIEW));
-        assertFalse(handler.supportsView(ComplexObsHandler.TITLE_VIEW));
-        assertFalse(handler.supportsView(ComplexObsHandler.URI_VIEW));
-        assertFalse(handler.supportsView(""));
-        assertFalse(handler.supportsView(null));
-    }
-    
 	@Test
-	public void saveObs_shouldRetrieveCorrectMimetype() throws IOException {
+	public void shouldNotSupportOtherViews() {
+
+		assertFalse(handler.supportsView(ComplexObsHandler.HTML_VIEW));
+		assertFalse(handler.supportsView(ComplexObsHandler.PREVIEW_VIEW));
+		assertFalse(handler.supportsView(ComplexObsHandler.TEXT_VIEW));
+		assertFalse(handler.supportsView(ComplexObsHandler.TITLE_VIEW));
+		assertFalse(handler.supportsView(ComplexObsHandler.URI_VIEW));
+		assertFalse(handler.supportsView(""));
+		assertFalse(handler.supportsView(null));
+	}
+
+	@Test
+	public void saveObs_shouldRetrieveCorrectMimetypeAndTitle() throws IOException {
 		String mimetype = "application/octet-stream";
 		String filename = "TestingComplexObsSaving";
 		byte[] content = "Teststring".getBytes();
-		
+
 		ComplexData complexData = new ComplexData(filename, content);
-		
+
 		// Construct 2 Obs to also cover the case where the filename exists already
 		Obs obs1 = new Obs();
 		obs1.setComplexData(complexData);
-		
+
 		Obs obs2 = new Obs();
 		obs2.setComplexData(complexData);
 
-		adminService.saveGlobalProperty(new GlobalProperty(
-			OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR,
-			complexObsTestFolder.toAbsolutePath().toString()
-		));
+		adminService.saveGlobalProperty(new GlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR, "obs"));
 
 		// Execute save
 		handler.saveObs(obs1);
 		handler.saveObs(obs2);
-		
+
 		// Get observation
 		Obs complexObs1 = handler.getObs(obs1, "RAW_VIEW");
 		Obs complexObs2 = handler.getObs(obs2, "RAW_VIEW");
-		
+
 		assertEquals(complexObs1.getComplexData().getMimeType(), mimetype);
+		assertEquals(complexObs1.getComplexData().getTitle(), filename);
 		assertEquals(complexObs2.getComplexData().getMimeType(), mimetype);
+		assertEquals(complexObs2.getComplexData().getTitle(), filename);
 	}
-	
+
+	@Test
+	public void saveObs_shouldNotDuplicateKeyWhenUpdating() throws IOException {
+		String filename = "TestingComplexObsSaving";
+		byte[] content = "Teststring".getBytes();
+
+		ComplexData complexData = new ComplexData(filename, content);
+
+		Obs obs = new Obs();
+		obs.setComplexData(complexData);
+
+		adminService.saveGlobalProperty(new GlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR, "obs"));
+
+		// Execute save
+		handler.saveObs(obs);
+
+		// Get observation
+		Obs complexObs = handler.getObs(obs, "RAW_VIEW");
+
+		String initialKey = complexObs.getValueComplex().split("\\|")[1];
+		Integer initialKeyLength = initialKey.length();
+		assertTrue(initialKey.endsWith("TestingComplexObsSaving"));
+
+		// update
+		handler.saveObs(obs);
+		;
+		complexObs = handler.getObs(obs, "RAW_VIEW");
+		String updatedKey = complexObs.getValueComplex().split("\\|")[1];
+		Integer updatedKeyLength = updatedKey.length();
+		assertTrue(updatedKey.endsWith("TestingComplexObsSaving"));
+		// we use the fact that the length grown as a proxy for
+		// duplication, may not work if we change the way keys are generated, see:
+		// https://openmrs.atlassian.net/browse/TRUNK-6472
+		assertEquals(initialKeyLength, updatedKeyLength);
+
+	}
+
 }

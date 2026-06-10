@@ -42,7 +42,7 @@
 			column="value_numeric" length="22" />
 		<property name="valueModifier" type="java.lang.String"
 			column="value_modifier" length="2" />
-		<property name="valueText" type="java.lang.String"
+		<property name="valueText" type="text"
 			column="value_text" length="65535" />
 		<property name="valueComplex" type="java.lang.String"
 		    column="value_complex" length="1000" />
@@ -64,15 +64,13 @@
 		<property name="formNamespaceAndPath" type="java.lang.String"
 			column="form_namespace_and_path" length="255" access="field" />
 		<property name="status" column="status" length="16" not-null="true">
-			<type name="org.hibernate.type.EnumType">
+			<type name="org.openmrs.api.db.hibernate.type.StringEnumType">
 				<param name="enumClass">org.openmrs.Obs$Status</param>
-				<param name="useNamed">true</param>
 			</type>
 		</property>
 		<property name="interpretation" column="interpretation" length="32">
-			<type name="org.hibernate.type.EnumType">
+			<type name="org.openmrs.api.db.hibernate.type.StringEnumType">
 				<param name="enumClass">org.openmrs.Obs$Interpretation</param>
-				<param name="useNamed">true</param>
 			</type>
 		</property>
 		
@@ -99,6 +97,8 @@
 			<one-to-many class="Obs" />
 		</set> 
 		<many-to-one name="previousVersion" class="Obs" column="previous_version" unique="true" />
+
+		<one-to-one name="referenceRange" class="org.openmrs.ObsReferenceRange" cascade="all"  />
 	</class>
 	
 </hibernate-mapping>

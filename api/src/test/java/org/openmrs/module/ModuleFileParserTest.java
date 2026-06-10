@@ -9,15 +9,6 @@
  */
 package org.openmrs.module;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.core.StringStartsWith.startsWith;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -28,6 +19,8 @@ import java.io.Writer;
 import java.nio.file.Path;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipEntry;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.ParserConfigurationException;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -43,18 +36,22 @@ import org.w3c.dom.ls.DOMImplementationLS;
 import org.w3c.dom.ls.LSOutput;
 import org.w3c.dom.ls.LSSerializer;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.core.StringStartsWith.startsWith;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.openmrs.util.XmlUtils.createDocumentBuilder;
+
 /**
- * Tests {@link ModuleFileParser} with a database and file IO.
- * Mostly deprecated methods are tested but also contains one integration style test parsing the logic module from test resources.
+ * Tests {@link ModuleFileParser} with a database and file IO. Mostly deprecated methods are tested
+ * but also contains one integration style test parsing the logic module from test resources.
  */
 public class ModuleFileParserTest extends BaseContextSensitiveTest {
 
 	private static final String LOGIC_MODULE_PATH = "org/openmrs/module/include/logic-0.2.omod";
 
-	private static DocumentBuilderFactory documentBuilderFactory;
-
 	private static DocumentBuilder documentBuilder;
-
 
 	@TempDir
 	public Path temporaryFolder;
@@ -64,41 +61,39 @@ public class ModuleFileParserTest extends BaseContextSensitiveTest {
 
 	@BeforeAll
 	public static void setUp() throws ParserConfigurationException {
-		documentBuilderFactory = DocumentBuilderFactory.newInstance();
-		documentBuilder = documentBuilderFactory.newDocumentBuilder();
+		documentBuilder = createDocumentBuilder();
 	}
 
 	@Test
 	public void moduleFileParser_shouldFailCreatingParserFromFileIfGivenNull() {
-
 		expectModuleExceptionWithTranslatedMessage(() -> new ModuleFileParser((File) null), "Module.error.fileCannotBeNull");
 	}
 
 	@Test
 	public void moduleFileParser_shouldFailCreatingParserFromFileIfNotEndingInOmod() {
-
-		expectModuleExceptionWithTranslatedMessage(() -> new ModuleFileParser(new File("reporting.jar")), "Module.error.invalidFileExtension");
+		expectModuleExceptionWithTranslatedMessage(() -> new ModuleFileParser(new File("reporting.jar")),
+		    "Module.error.invalidFileExtension");
 	}
 
 	@Test
 	public void moduleFileParser_shouldFailCreatingParserFromFileIfInputStreamClosed() throws IOException {
-
 		File moduleFile = new File(getClass().getClassLoader().getResource(LOGIC_MODULE_PATH).getPath());
 
-		InputStream inputStream = new FileInputStream(moduleFile);
-		inputStream.close();
-
-		expectModuleExceptionWithTranslatedMessage(() -> new ModuleFileParser(inputStream), "Module.error.cannotCreateFile");
+		try (InputStream inputStream = new FileInputStream(moduleFile)) {
+			inputStream.close();
+			expectModuleExceptionWithTranslatedMessage(() -> new ModuleFileParser(inputStream),
+			    "Module.error.cannotCreateFile");
+		}
 	}
 
 	@Test
 	public void parse_shouldParseValidXmlConfigCreatedFromInputStream() throws IOException {
-
 		File moduleFile = new File(getClass().getClassLoader().getResource(LOGIC_MODULE_PATH).getPath());
 
-		ModuleFileParser parser = new ModuleFileParser(new FileInputStream(moduleFile));
-
-		Module module = parser.parse();
+		Module module;
+		try (FileInputStream moduleFileInputStream = new FileInputStream(moduleFile)) {
+			module = new ModuleFileParser().parse(moduleFileInputStream);
+		}
 
 		assertThat(module.getModuleId(), is("logic"));
 		assertThat(module.getVersion(), is("0.2"));
@@ -120,23 +115,20 @@ public class ModuleFileParserTest extends BaseContextSensitiveTest {
 		// to mock it using mockito
 
 		String invalidConfigVersion = "0.0.1";
-		String expectedMessage = messageSourceService
-			.getMessage("Module.error.invalidConfigVersion",
-				new Object[] { invalidConfigVersion, "1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6" }, Context.getLocale());
+		String expectedMessage = messageSourceService.getMessage("Module.error.invalidConfigVersion",
+		    new Object[] { invalidConfigVersion, "1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.0" }, Context.getLocale());
 
 		Document configXml = documentBuilder.newDocument();
 		Element root = configXml.createElement("module");
 		configXml.appendChild(root);
 		configXml.getDocumentElement().setAttribute("configVersion", invalidConfigVersion);
 
-		ModuleFileParser parser = new ModuleFileParser(writeConfigXmlToFile(configXml));
-
-		expectModuleExceptionWithMessage(() -> parser.parse(), expectedMessage);
+		expectModuleExceptionWithMessage(() -> new ModuleFileParser().parse(writeConfigXmlToFile(configXml)),
+		    expectedMessage);
 	}
 
 	@Test
 	public void parse_shouldParseValidLogicModuleFromFile() {
-
 		File moduleFile = new File(getClass().getClassLoader().getResource(LOGIC_MODULE_PATH).getPath());
 		ModuleFileParser parser = new ModuleFileParser(Context.getMessageSourceService());
 
@@ -148,6 +140,7 @@ public class ModuleFileParserTest extends BaseContextSensitiveTest {
 		assertThat(module.getActivatorName(), is("org.openmrs.logic.LogicModuleActivator"));
 		assertThat(module.getMappingFiles().size(), is(1));
 		assertThat(module.getMappingFiles(), hasItems("LogicRuleToken.hbm.xml"));
+		assertThat(module.getConfigVersion(), is("1.3"));
 	}
 
 	private void expectModuleExceptionWithTranslatedMessage(Executable executable, String s) {

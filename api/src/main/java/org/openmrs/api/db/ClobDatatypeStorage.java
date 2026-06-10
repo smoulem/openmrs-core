@@ -9,21 +9,35 @@
  */
 package org.openmrs.api.db;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import org.hibernate.envers.Audited;
 import org.openmrs.BaseOpenmrsObject;
 
 /**
  * Stores a potentially-long String value, for clob-based custom datatypes
- * 
+ *
  * @since 1.9
  */
+@Entity
+@Table(name = "clob_datatype_storage")
+@Audited
 public class ClobDatatypeStorage extends BaseOpenmrsObject {
-	
+
+	@Id
+	@Column(name = "id")
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	
+
 	// inherits uuid from BaseOpenmrsObject
-	
+	@Column(name = "value", nullable = false, columnDefinition = "LONGTEXT")
 	String value;
-	
+
 	/**
 	 * @see org.openmrs.OpenmrsObject#getId()
 	 */
@@ -31,7 +45,7 @@ public class ClobDatatypeStorage extends BaseOpenmrsObject {
 	public Integer getId() {
 		return id;
 	}
-	
+
 	/**
 	 * @see org.openmrs.OpenmrsObject#setId(java.lang.Integer)
 	 */
@@ -39,19 +53,19 @@ public class ClobDatatypeStorage extends BaseOpenmrsObject {
 	public void setId(Integer id) {
 		this.id = id;
 	}
-	
+
 	/**
 	 * @return the value
 	 */
 	public String getValue() {
 		return value;
 	}
-	
+
 	/**
 	 * @param value the value to set
 	 */
 	public void setValue(String value) {
 		this.value = value;
 	}
-	
+
 }

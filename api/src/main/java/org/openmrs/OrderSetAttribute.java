@@ -10,20 +10,22 @@
 
 package org.openmrs;
 
+import org.hibernate.envers.Audited;
 import org.openmrs.attribute.Attribute;
 import org.openmrs.attribute.BaseAttribute;
 
 /**
  * A value for a user-defined {@link OrderSetAttributeType} that is stored on a {@link OrderSet}.
+ *
  * @see Attribute
  * @since 2.4.0
  */
-public class OrderSetAttribute extends BaseAttribute<OrderSetAttributeType, OrderSet> implements Attribute<OrderSetAttributeType, OrderSet>{
-	
-	private static final long serialVersionUID = 1L;
-		
-	private Integer orderSetAttributeId;
+@Audited
+public class OrderSetAttribute extends BaseAttribute<OrderSetAttributeType, OrderSet> implements Attribute<OrderSetAttributeType, OrderSet> {
 
+	private static final long serialVersionUID = 1L;
+
+	private Integer orderSetAttributeId;
 
 	/**
 	 * @return the orderSetAttributeId

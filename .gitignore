@@ -61,7 +61,6 @@ nb-configuration.xml
 ################
 
 ### Linux ###
-.*
 !.gitignore
 !.gitattributes
 !.tx
@@ -75,6 +74,7 @@ nb-configuration.xml
 /webapp/src/main/webapp/WEB-INF/dwr-modules.xml
 /webapp/src/main/webapp/WEB-INF/module_messages*
 /web/WEB-INF/dwr-modules.xml
+/openmrs-merged.properties
 #############
 
 ### log files ###
@@ -87,3 +87,8 @@ nb-configuration.xml
 ### Liquibase snapshot files ###
 liquibase/snapshots/*.xml
 #############
+api/ConceptName/
+api/Drug/
+api/PatientIdentifier/
+api/PersonAttribute/
+api/PersonName/

@@ -9,18 +9,19 @@
  */
 package org.openmrs.parameter;
 
-import org.openmrs.*;
-
 import java.util.Collection;
 import java.util.Date;
 
+import org.openmrs.*;
+
 /**
- * A convenience builder for {@link OrderSearchCriteria}. Create a builder, set
- * its properties to desired values and finally call {@link #build()}
- * to create the actual search criteria instance.
+ * A convenience builder for {@link OrderSearchCriteria}. Create a builder, set its properties to
+ * desired values and finally call {@link #build()} to create the actual search criteria instance.
+ *
  * @see OrderSearchCriteria
  */
 public class OrderSearchCriteriaBuilder {
+
 	private Patient patient;
 
 	private CareSetting careSetting;
@@ -28,9 +29,11 @@ public class OrderSearchCriteriaBuilder {
 	private Collection<Concept> concepts;
 
 	private Collection<OrderType> orderTypes;
-	
+
+	private Visit visit;
+
 	private String accessionNumber;
-	
+
 	private String orderNumber;
 
 	private Date activatedOnOrBeforeDate;
@@ -61,6 +64,16 @@ public class OrderSearchCriteriaBuilder {
 	 */
 	public OrderSearchCriteriaBuilder setPatient(Patient patient) {
 		this.patient = patient;
+		return (this);
+	}
+
+	/**
+	 * @param visit the visit the order is for
+	 * @return this builder instance
+	 * @since 2.7.0
+	 */
+	public OrderSearchCriteriaBuilder setVisit(Visit visit) {
+		this.visit = visit;
 		return (this);
 	}
 
@@ -108,7 +121,7 @@ public class OrderSearchCriteriaBuilder {
 		this.orderNumber = orderNumber;
 		return (this);
 	}
-	
+
 	/**
 	 * @param activatedOnOrBeforeDate orders must have dateActivated on or before this date
 	 * @return this builder instance
@@ -128,7 +141,6 @@ public class OrderSearchCriteriaBuilder {
 	}
 
 	/**
-	 *
 	 * @param isStopped
 	 * @return this builde instance
 	 */
@@ -138,7 +150,6 @@ public class OrderSearchCriteriaBuilder {
 	}
 
 	/**
-	 * 
 	 * @param autoExpireOnOrBeforeDate
 	 * @return this builder instance
 	 */
@@ -148,7 +159,6 @@ public class OrderSearchCriteriaBuilder {
 	}
 
 	/**
-	 *
 	 * @param canceledOrExpiredOnOrBeforeDate
 	 * @return this builder instance
 	 */
@@ -158,17 +168,15 @@ public class OrderSearchCriteriaBuilder {
 	}
 
 	/**
-     *
-     * @param action
-     * @return this builder instance
-     */
-    public OrderSearchCriteriaBuilder setAction(Order.Action action) {
-        this.action = action;
-        return (this);
-    }
+	 * @param action
+	 * @return this builder instance
+	 */
+	public OrderSearchCriteriaBuilder setAction(Order.Action action) {
+		this.action = action;
+		return (this);
+	}
 
-    /**
-	 *
+	/**
 	 * @param fulfillerStatus
 	 * @return this builder instance
 	 */
@@ -178,7 +186,6 @@ public class OrderSearchCriteriaBuilder {
 	}
 
 	/**
-	 *
 	 * @param includeNullFulfillerStatus
 	 * @return
 	 */
@@ -208,12 +215,13 @@ public class OrderSearchCriteriaBuilder {
 
 	/**
 	 * Create an {@link OrderSearchCriteria} with the properties of this builder instance.
+	 *
 	 * @return a new search criteria instance
 	 */
 	public OrderSearchCriteria build() {
-		return new OrderSearchCriteria(patient, careSetting, concepts, orderTypes, accessionNumber, orderNumber, activatedOnOrBeforeDate,  
-			activatedOnOrAfterDate, isStopped, autoExpireOnOrBeforeDate, canceledOrExpiredOnOrBeforeDate,
-				action, fulfillerStatus, includeNullFulfillerStatus, excludeCanceledAndExpired, excludeDiscontinueOrders, includeVoided);
+		return new OrderSearchCriteria(patient, careSetting, concepts, orderTypes, accessionNumber, orderNumber,
+		        activatedOnOrBeforeDate, activatedOnOrAfterDate, isStopped, autoExpireOnOrBeforeDate,
+		        canceledOrExpiredOnOrBeforeDate, action, fulfillerStatus, includeNullFulfillerStatus,
+		        excludeCanceledAndExpired, excludeDiscontinueOrders, includeVoided, visit);
 	}
 }
-

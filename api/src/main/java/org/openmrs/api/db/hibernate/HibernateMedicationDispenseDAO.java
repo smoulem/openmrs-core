@@ -9,28 +9,34 @@
  */
 package org.openmrs.api.db.hibernate;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+
 import org.hibernate.SessionFactory;
 import org.openmrs.MedicationDispense;
 import org.openmrs.api.db.MedicationDispenseDAO;
 import org.openmrs.parameter.MedicationDispenseCriteria;
-
-import javax.persistence.criteria.CriteriaBuilder;
-import javax.persistence.criteria.CriteriaQuery;
-import javax.persistence.criteria.Predicate;
-import javax.persistence.criteria.Root;
-import java.util.ArrayList;
-import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
 
 /**
  * Hibernate implementation of the MedicationDispenseDAO
+ *
  * @since 2.6.0
  * @see MedicationDispenseDAO
  */
+@Repository("medicationDispenseDAO")
 public class HibernateMedicationDispenseDAO implements MedicationDispenseDAO {
-	
-	private SessionFactory sessionFactory;
-	
-	public void setSessionFactory(SessionFactory sessionFactory) {
+
+	private final SessionFactory sessionFactory;
+
+	@Autowired
+	public HibernateMedicationDispenseDAO(SessionFactory sessionFactory) {
 		this.sessionFactory = sessionFactory;
 	}
 
@@ -41,10 +47,7 @@ public class HibernateMedicationDispenseDAO implements MedicationDispenseDAO {
 
 	@Override
 	public MedicationDispense getMedicationDispenseByUuid(String uuid) {
-		return sessionFactory.getCurrentSession()
-			.createQuery("select md from MedicationDispense md where md.uuid = :uuid", MedicationDispense.class)
-			.setParameter("uuid", uuid)
-			.uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, MedicationDispense.class, uuid);
 	}
 
 	@Override
@@ -66,7 +69,7 @@ public class HibernateMedicationDispenseDAO implements MedicationDispenseDAO {
 			predicates.add(criteriaBuilder.equal(md.get("voided"), false));
 		}
 		if (predicates.size() > 0) {
-			criteriaQuery.where(predicates.toArray(new Predicate[]{}));
+			criteriaQuery.where(predicates.toArray(new Predicate[] {}));
 		}
 		criteriaQuery.orderBy(criteriaBuilder.asc(md.get("medicationDispenseId")));
 		return sessionFactory.getCurrentSession().createQuery(criteriaQuery).list();
@@ -74,12 +77,11 @@ public class HibernateMedicationDispenseDAO implements MedicationDispenseDAO {
 
 	@Override
 	public MedicationDispense saveMedicationDispense(MedicationDispense medicationDispense) {
-		sessionFactory.getCurrentSession().saveOrUpdate(medicationDispense);
-		return medicationDispense;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), medicationDispense);
 	}
 
 	@Override
 	public void deleteMedicationDispense(MedicationDispense medicationDispense) {
-		sessionFactory.getCurrentSession().delete(medicationDispense);
+		sessionFactory.getCurrentSession().remove(medicationDispense);
 	}
 }

@@ -13,14 +13,14 @@
 	<parent>
 		<groupId>org.openmrs</groupId>
 		<artifactId>openmrs</artifactId>
-		<version>2.7.0-SNAPSHOT</version>
+		<version>3.0.0-SNAPSHOT</version>
 	</parent>
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.openmrs.liquibase</groupId>
 	<artifactId>openmrs-liquibase</artifactId>
 	<name>openmrs-liquibase</name>
 	<packaging>jar</packaging>
-	<description>Generate  running liquibase change sets from the console</description>
+	<description>Generate running liquibase change sets from the console</description>
 
 	<dependencies>
 		<dependency>
@@ -28,8 +28,9 @@
 			<artifactId>jaxen</artifactId>
 		</dependency>
 		<dependency>
-			<groupId>mysql</groupId>
-			<artifactId>mysql-connector-java</artifactId>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<scope>runtime</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
@@ -38,11 +39,11 @@
 		<dependency>
 			<groupId>org.dom4j</groupId>
 			<artifactId>dom4j</artifactId>
-			<version>2.1.4</version>
 		</dependency>
 		<dependency>
 			<groupId>org.hamcrest</groupId>
 			<artifactId>hamcrest</artifactId>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
@@ -52,7 +53,7 @@
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
 			<artifactId>junit-jupiter-engine</artifactId>
-			<version>${junitVersion}</version>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
@@ -62,6 +63,7 @@
 		<dependency>
 			<groupId>org.mockito</groupId>
 			<artifactId>mockito-core</artifactId>
+			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
@@ -74,7 +76,6 @@
 			<plugin>
 				<groupId>org.liquibase</groupId>
 				<artifactId>liquibase-maven-plugin</artifactId>
-				<version>3.10.3</version>
 				<configuration>
 					<changeLogFile>snapshots/${changelogfile}</changeLogFile>
 					<diffTypes>${diffTypes}</diffTypes>

@@ -9,7 +9,9 @@
  */
 package org.openmrs.api.impl;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -17,36 +19,42 @@ import org.openmrs.Person;
 import org.openmrs.Provider;
 import org.openmrs.ProviderAttribute;
 import org.openmrs.ProviderAttributeType;
+import org.openmrs.ProviderRole;
 import org.openmrs.api.APIException;
 import org.openmrs.api.ProviderService;
+import org.openmrs.api.RefByUuid;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.ProviderDAO;
 import org.openmrs.customdatatype.CustomDatatypeUtil;
 import org.openmrs.util.OpenmrsConstants;
 import org.openmrs.util.OpenmrsUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Default implementation of the {@link ProviderService}. This class should not be used on its own.
  * The current OpenMRS implementation should be fetched from the Context.
- * 
+ *
  * @since 1.9
  */
+@Service("providerService")
 @Transactional
-public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderService {
-	
+public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderService, RefByUuid {
+
+	@Autowired
 	private ProviderDAO dao;
-	
+
 	/**
-	 * Sets the data access object for Concepts. The dao is used for saving and getting concepts
-	 * to/from the database
-	 * 
+	 * Sets the data access object for Concepts. The dao is used for saving and getting concepts to/from
+	 * the database
+	 *
 	 * @param dao The data access object to use
 	 */
 	public void setProviderDAO(ProviderDAO dao) {
 		this.dao = dao;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getAllProviders()
 	 */
@@ -55,7 +63,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public List<Provider> getAllProviders() {
 		return Context.getProviderService().getAllProviders(true);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getAllProviders(boolean)
 	 */
@@ -64,7 +72,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public List<Provider> getAllProviders(boolean includeRetired) {
 		return dao.getAllProviders(includeRetired);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#retireProvider(org.openmrs.Provider, java.lang.String)
 	 */
@@ -72,7 +80,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public void retireProvider(Provider provider, String reason) {
 		dao.saveProvider(provider);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#unretireProvider(org.openmrs.Provider)
 	 */
@@ -80,7 +88,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Provider unretireProvider(Provider provider) {
 		return Context.getProviderService().saveProvider(provider);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#purgeProvider(org.openmrs.Provider)
 	 */
@@ -88,7 +96,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public void purgeProvider(Provider provider) {
 		dao.deleteProvider(provider);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProvider(java.lang.Integer)
 	 */
@@ -97,7 +105,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Provider getProvider(Integer providerId) {
 		return dao.getProvider(providerId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#saveProvider(org.openmrs.Provider)
 	 */
@@ -106,7 +114,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 		CustomDatatypeUtil.saveAttributesIfNecessary(provider);
 		return dao.saveProvider(provider);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderByUuid(java.lang.String)
 	 */
@@ -115,7 +123,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Provider getProviderByUuid(String uuid) {
 		return dao.getProviderByUuid(uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProvidersByPerson(org.openmrs.Person, boolean )
 	 */
@@ -124,7 +132,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Collection<Provider> getProvidersByPerson(Person person, boolean includeRetired) {
 		return dao.getProvidersByPerson(person, includeRetired);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProvidersByPerson(org.openmrs.Person)
 	 */
@@ -136,7 +144,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 		}
 		return Context.getProviderService().getProvidersByPerson(person, true);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getCountOfProviders(java.lang.String)
 	 */
@@ -145,7 +153,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Integer getCountOfProviders(String query) {
 		return Context.getProviderService().getCountOfProviders(query, false);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getCountOfProviders(java.lang.String, boolean)
 	 */
@@ -153,7 +161,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Integer getCountOfProviders(String query, boolean includeRetired) {
 		return OpenmrsUtil.convertToInteger(dao.getCountOfProviders(query, includeRetired));
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviders(String, Integer, Integer, java.util.Map,
 	 *      boolean)
@@ -166,7 +174,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 		        .getValueReferences(attributeValues);
 		return dao.getProviders(query, serializedAttributeValues, start, length, includeRetired);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviders(String, Integer, Integer, java.util.Map)
 	 */
@@ -176,7 +184,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	        Map<ProviderAttributeType, Object> attributeValues) {
 		return Context.getProviderService().getProviders(query, start, length, attributeValues, true);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getAllProviderAttributeTypes()
 	 */
@@ -185,7 +193,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public List<ProviderAttributeType> getAllProviderAttributeTypes() {
 		return dao.getAllProviderAttributeTypes(true);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getAllProviderAttributeTypes(boolean)
 	 */
@@ -194,7 +202,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public List<ProviderAttributeType> getAllProviderAttributeTypes(boolean includeRetired) {
 		return dao.getAllProviderAttributeTypes(includeRetired);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderAttributeType(java.lang.Integer)
 	 */
@@ -203,7 +211,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public ProviderAttributeType getProviderAttributeType(Integer providerAttributeTypeId) {
 		return dao.getProviderAttributeType(providerAttributeTypeId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderAttributeTypeByUuid(java.lang.String)
 	 */
@@ -212,27 +220,36 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public ProviderAttributeType getProviderAttributeTypeByUuid(String uuid) {
 		return dao.getProviderAttributeTypeByUuid(uuid);
 	}
-	
+
+	/**
+	 * @see org.openmrs.api.ProviderService#getProviderAttributeTypeByName(String)
+	 */
+	@Override
+	@Transactional(readOnly = true)
+	public ProviderAttributeType getProviderAttributeTypeByName(String name) {
+		return dao.getProviderAttributeTypeByName(name);
+	}
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderAttribute(java.lang.Integer)
 	 */
-	
+
 	@Override
 	@Transactional(readOnly = true)
 	public ProviderAttribute getProviderAttribute(Integer providerAttributeID) {
 		return dao.getProviderAttribute(providerAttributeID);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderAttributeByUuid(String)
 	 */
-	
+
 	@Override
 	@Transactional(readOnly = true)
 	public ProviderAttribute getProviderAttributeByUuid(String uuid) {
 		return dao.getProviderAttributeByUuid(uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#saveProviderAttributeType(org.openmrs.ProviderAttributeType)
 	 */
@@ -240,7 +257,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public ProviderAttributeType saveProviderAttributeType(ProviderAttributeType providerAttributeType) {
 		return dao.saveProviderAttributeType(providerAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#retireProviderAttributeType(org.openmrs.ProviderAttributeType,
 	 *      java.lang.String)
@@ -249,7 +266,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public ProviderAttributeType retireProviderAttributeType(ProviderAttributeType providerAttributeType, String reason) {
 		return Context.getProviderService().saveProviderAttributeType(providerAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#unretireProviderAttributeType(org.openmrs.ProviderAttributeType)
 	 */
@@ -257,7 +274,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public ProviderAttributeType unretireProviderAttributeType(ProviderAttributeType providerAttributeType) {
 		return Context.getProviderService().saveProviderAttributeType(providerAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#purgeProviderAttributeType(org.openmrs.ProviderAttributeType)
 	 */
@@ -265,7 +282,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public void purgeProviderAttributeType(ProviderAttributeType providerAttributeType) {
 		dao.deleteProviderAttributeType(providerAttributeType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#isProviderIdentifierUnique(Provider)
 	 */
@@ -274,7 +291,7 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public boolean isProviderIdentifierUnique(Provider provider) throws APIException {
 		return dao.isProviderIdentifierUnique(provider);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getProviderByIdentifier(java.lang.String)
 	 */
@@ -283,14 +300,109 @@ public class ProviderServiceImpl extends BaseOpenmrsService implements ProviderS
 	public Provider getProviderByIdentifier(String identifier) {
 		return dao.getProviderByIdentifier(identifier);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.ProviderService#getUnknownProvider()
 	 */
 	@Override
 	@Transactional(readOnly = true)
 	public Provider getUnknownProvider() {
-		return getProviderByUuid(Context.getAdministrationService().getGlobalProperty(
-		    OpenmrsConstants.GP_UNKNOWN_PROVIDER_UUID));
+		return getProviderByUuid(
+		    Context.getAdministrationService().getGlobalProperty(OpenmrsConstants.GP_UNKNOWN_PROVIDER_UUID));
+	}
+
+	/**
+	 * @see ProviderService#getProviderRole(Integer)
+	 */
+	@Override
+	@Transactional(readOnly = true)
+	public ProviderRole getProviderRole(Integer providerRoleId) {
+		return dao.getProviderRole(providerRoleId);
+	}
+
+	/**
+	 * @see ProviderService#getProviderRoleByUuid(String)
+	 */
+	@Override
+	@Transactional(readOnly = true)
+	public ProviderRole getProviderRoleByUuid(String uuid) {
+		return dao.getProviderRoleByUuid(uuid);
+	}
+
+	/**
+	 * @see ProviderService#getProvidersByRoles(List)
+	 */
+	@Override
+	@Transactional(readOnly = true)
+	public List<Provider> getProvidersByRoles(List<ProviderRole> roles) {
+		return dao.getProvidersByRoles(roles, false);
+	}
+
+	/**
+	 * @see ProviderService#getAllProviderRoles(boolean)
+	 */
+	@Override
+	@Transactional(readOnly = true)
+	public List<ProviderRole> getAllProviderRoles(boolean includeRetired) {
+		return dao.getAllProviderRoles(includeRetired);
+	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public <T> T getRefByUuid(Class<T> type, String uuid) {
+		if (ProviderAttributeType.class.equals(type)) {
+			return (T) getProviderAttributeTypeByUuid(uuid);
+		}
+		if (ProviderRole.class.equals(type)) {
+			return (T) getProviderRoleByUuid(uuid);
+		}
+		if (Provider.class.equals(type)) {
+			return (T) getProviderByUuid(uuid);
+		}
+		if (ProviderAttribute.class.equals(type)) {
+			return (T) getProviderAttributeByUuid(uuid);
+		}
+		throw new APIException("Unsupported type for getRefByUuid: " + type != null ? type.getName() : "null");
+	}
+
+	@Override
+	public List<Class<?>> getRefTypes() {
+		return Arrays.asList(ProviderAttributeType.class, ProviderRole.class, Provider.class, ProviderAttribute.class);
+	}
+
+	/**
+	 * @see ProviderService#saveProviderRole(ProviderRole)
+	 */
+	@Override
+	public ProviderRole saveProviderRole(ProviderRole providerRole) {
+		return dao.saveProviderRole(providerRole);
+	}
+
+	/**
+	 * @see ProviderService#retireProviderRole(ProviderRole, String)
+	 */
+	@Override
+	public ProviderRole retireProviderRole(ProviderRole providerRole, String reason) {
+		return Context.getProviderService().saveProviderRole(providerRole);
+	}
+
+	/**
+	 * @see ProviderService#unretireProviderRole(ProviderRole)
+	 */
+	@Override
+	public ProviderRole unretireProviderRole(ProviderRole providerRole) {
+		return Context.getProviderService().saveProviderRole(providerRole);
+	}
+
+	/**
+	 * @see ProviderService#purgeProviderRole(ProviderRole)
+	 */
+	@Override
+	public void purgeProviderRole(ProviderRole providerRole) {
+		List<Provider> providersWithRole = getProvidersByRoles(Collections.singletonList(providerRole));
+		if (!providersWithRole.isEmpty()) {
+			throw new APIException("Cannot purge a provider role that is assigned to one or more providers");
+		}
+		dao.deleteProviderRole(providerRole);
 	}
 }

@@ -10,6 +10,7 @@
 package org.openmrs.liquibase;
 
 import java.util.List;
+
 import org.dom4j.Document;
 import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
@@ -28,55 +29,84 @@ public class SchemaOnlyTuner extends AbstractSnapshotTuner {
 	public Document updateChangeLog(Document document) {
 		document = replaceBitWithBoolean(document);
 		document = replaceLongtextWithClob(document);
-		document = detachLiquibaseTables( document );
+		document = detachLiquibaseTables(document);
+		document = removeEmptyOrNullDefaultValues(document);
 		return document;
 	}
-	
+
 	Document detachLiquibaseTables(Document document) {
 		document = detachChangeSet(document, "liquibasechangelog");
 		document = detachChangeSet(document, "liquibasechangeloglock");
-		
+
 		return document;
 	}
-	
+
 	Document detachChangeSet(Document document, String tableName) {
 		XPath xPath = DocumentHelper.createXPath(String.format("//dbchangelog:createTable[@tableName=\"%s\"]", tableName));
 		xPath.setNamespaceURIs(getNamespaceUris());
-		
+
 		Node node = xPath.selectSingleNode(document);
 		node.getParent().detach();
-		
+
 		return document;
 	}
-	
+
 	Document replaceBitWithBoolean(Document document) {
-		XPath xPath = DocumentHelper.createXPath("//dbchangelog:column[@type=\"BIT(1)\"]/attribute::type");
+		XPath xPath = DocumentHelper.createXPath("//dbchangelog:column[@type=\"BIT\"]/attribute::type");
 		xPath.setNamespaceURIs(getNamespaceUris());
-		
+
 		List<Node> nodes = xPath.selectNodes(document);
 		for (Node node : nodes) {
 			Element parent = node.getParent();
 			parent.addAttribute("type", "BOOLEAN");
+
+			String defaultValue = parent.attributeValue("defaultValueNumeric");
+			if (defaultValue != null) {
+				if (defaultValue.equals("1")) {
+					parent.addAttribute("defaultValueBoolean", "true");
+					parent.remove(parent.attribute("defaultValueNumeric"));
+				} else if (defaultValue.equals("0")) {
+					parent.addAttribute("defaultValueBoolean", "false");
+					parent.remove(parent.attribute("defaultValueNumeric"));
+				}
+			}
 		}
-		
+
 		return document;
 	}
-	
+
+	Document removeEmptyOrNullDefaultValues(Document document) {
+		XPath xPath = DocumentHelper.createXPath(
+		    "//dbchangelog:column[@defaultValue=\"\"] | //dbchangelog:column[@defaultValueComputed=\"NULL\"]");
+		xPath.setNamespaceURIs(getNamespaceUris());
+		xPath.selectNodes(document).forEach(node -> {
+			Node defaultValueAttr = node.selectSingleNode("@defaultValue");
+			if (defaultValueAttr != null) {
+				defaultValueAttr.detach();
+			}
+			Node defaultValueComputedAttr = node.selectSingleNode("@defaultValueComputed");
+			if (defaultValueComputedAttr != null) {
+				defaultValueComputedAttr.detach();
+			}
+		});
+		return document;
+	}
+
 	Document replaceLongtextWithClob(Document document) {
 		XPath xPath = DocumentHelper.createXPath("//dbchangelog:column[@type=\"LONGTEXT\"]/attribute::type");
 		xPath.setNamespaceURIs(getNamespaceUris());
-		
+
 		List<Node> nodes = xPath.selectNodes(document);
 		assertLongtextNodes(nodes);
-		
+
 		for (Node node : nodes) {
 			Element parent = node.getParent();
 			parent.addAttribute("type", "CLOB");
 		}
-		
+
 		return document;
 	}
-	
+
 	/**
 	 * This method asserts that the Liquibase schema only snapshot contains only one column of type
 	 * 'LONGTEXT'. This was the case when Liquibase snapshots were introduced in May 2020. If future
@@ -88,15 +118,15 @@ public class SchemaOnlyTuner extends AbstractSnapshotTuner {
 	 * @return a boolean value for unit testing
 	 */
 	boolean assertLongtextNodes(List<Node> nodes) {
-		assert nodes.size() == 1 : String
-		        .format("replacing the column type 'LONGTEXT' failed as the number of nodes is not 1 but %d", nodes.size());
-		
+		assert nodes.size() == 2 : String
+		        .format("replacing the column type 'LONGTEXT' failed as the number of nodes is not 2 but %d", nodes.size());
+
 		Node node = nodes.get(0);
 		Element grandParent = node.getParent().getParent();
-		
-		assert grandParent.attributeValue("tableName").equals(
-		    "clob_datatype_storage") : "replacing the column type 'LONGTEXT' failed as the node does not refer to the 'clob_datatype_storage' table";
-		
+
+		assert grandParent.attributeValue("tableName").equals("clob_datatype_storage")
+		        : "replacing the column type 'LONGTEXT' failed as the node does not refer to the 'clob_datatype_storage' table";
+
 		return true;
 	}
 }

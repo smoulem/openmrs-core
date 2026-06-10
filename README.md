@@ -7,6 +7,7 @@ test: [![test](https://snyk.io/test/github/openmrs/openmrs-core/badge.svg?target
 tools: [![tools](https://snyk.io/test/github/openmrs/openmrs-core/badge.svg?targetFile=tools%2Fpom.xml)](https://snyk.io/test/github/openmrs/openmrs-core?targetFile=tools%2Fpom.xml)
 web: [![web](https://snyk.io/test/github/openmrs/openmrs-core/badge.svg?targetFile=web%2Fpom.xml)](https://snyk.io/test/github/openmrs/openmrs-core?targetFile=web%2Fpom.xml)
 webapp: [![webapp](https://snyk.io/test/github/openmrs/openmrs-core/badge.svg?targetFile=webapp%2Fpom.xml)](https://snyk.io/test/github/openmrs/openmrs-core?targetFile=webapp%2Fpom.xml)
+DPGA: [![DPG Badge](https://img.shields.io/badge/Verified-DPG-3333AB?logo=data:image/svg%2bxml;base64,PHN2ZyB3aWR0aD0iMzEiIGhlaWdodD0iMzMiIHZpZXdCb3g9IjAgMCAzMSAzMyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE0LjIwMDggMjEuMzY3OEwxMC4xNzM2IDE4LjAxMjRMMTEuNTIxOSAxNi40MDAzTDEzLjk5MjggMTguNDU5TDE5LjYyNjkgMTIuMjExMUwyMS4xOTA5IDEzLjYxNkwxNC4yMDA4IDIxLjM2NzhaTTI0LjYyNDEgOS4zNTEyN0wyNC44MDcxIDMuMDcyOTdMMTguODgxIDUuMTg2NjJMMTUuMzMxNCAtMi4zMzA4MmUtMDVMMTEuNzgyMSA1LjE4NjYyTDUuODU2MDEgMy4wNzI5N0w2LjAzOTA2IDkuMzUxMjdMMCAxMS4xMTc3TDMuODQ1MjEgMTYuMDg5NUwwIDIxLjA2MTJMNi4wMzkwNiAyMi44Mjc3TDUuODU2MDEgMjkuMTA2TDExLjc4MjEgMjYuOTkyM0wxNS4zMzE0IDMyLjE3OUwxOC44ODEgMjYuOTkyM0wyNC44MDcxIDI5LjEwNkwyNC42MjQxIDIyLjgyNzdMMzAuNjYzMSAyMS4wNjEyTDI2LjgxNzYgMTYuMDg5NUwzMC42NjMxIDExLjExNzdMMjQuNjI0MSA5LjM1MTI3WiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cg==)](https://digitalpublicgoods.net/r/openmrs)
 
 OpenMRS is a patient-based medical record system focusing on giving providers a free customizable electronic medical record system (EMR).
 
@@ -75,7 +76,7 @@ Execute the following
 
 ```bash
 cd openmrs-core
-mvn clean package
+./mvnw clean package
 ```
 
 This will generate the OpenMRS application in `webapp/target/openmrs.war` which you will have to deploy into an application server like for example [tomcat](https://tomcat.apache.org/) or [jetty](http://www.eclipse.org/jetty/).
@@ -86,7 +87,25 @@ For development purposes you can simply deploy the `openmrs.war` into the applic
 
 ```bash
 cd openmrs-core/webapp
-mvn jetty:run
+../mvnw jetty:run
+```
+
+To run Jetty on a custom port, use the `jetty.http.port` property:
+
+```bash
+mvn -Djetty.http.port=8081 jetty:run
+```
+
+To run on Cargo, use the `cargo:run` command:
+
+```bash
+mvn cargo:run
+```
+
+To run Cargo on a custom port, use the `cargo.servlet.port` property:
+
+```bash
+mvn -Dcargo.servlet.port=8081 cargo:run
 ```
 
 If all goes well (check the console output) you can access the OpenMRS application at `localhost:8080/openmrs`.
@@ -102,27 +121,76 @@ The only prerequisite needed is Docker.
 
 In order to build a development version run:
 ```bash 
-docker-compose build
+docker compose build
 ```
 It calls `mvn install` by default. If you would like to customize mvn build arguments you can do so by running:
 ```bash
-docker-compose build --build-args MVN_ARGS='install -DskipTests'
+docker compose build --build-arg MVN_ARGS='install -DskipTests'
 ```
 It is also possible to use the built dev image to run jetty:
 ```bash
-docker-compose up
+docker compose up
 ```
 
 In order to build a production version run:
 ```bash
-docker-compose -f docker-compose.yml build
+docker compose -f docker-compose.yml build
 ```
 It first builds the dev image and then an image with Tomcat and openmrs.war. 
 It has no dev dependencies.
 
 The production version can be run with:
 ```bash
-docker-compose -f docker-compose.yml up
+docker compose -f docker-compose.yml up
+```
+If you want to debug, you need to run a development version and connect your debugger to port 8000, which is exposed by default.
+
+Unfortunately, at this point any code changes require full restart and rebuild of the docker container. To speed up the process,
+please use:
+```bash
+docker compose build --build-arg MVN_ARGS='install -DskipTests'
+docker compose up
+```
+We are working towards providing support for Spring Boot auto-reload feature, which will be documented here once ready.
+
+It is also possible to deploy an image built by our CI, which is published at 
+https://hub.docker.com/r/openmrs/openmrs-core
+
+You can run any tag available with:
+```bash
+TAG=nightly docker compose -f docker-compose.yml up
+```
+It is also possible to run a development version of an image with:
+```bash
+TAG=dev docker compose up
+```
+All development versions contain dev suffix. The cache suffix is for use by our CI.
+
+### Running with ElasticSearch
+
+OpenMRS can run with ElasticSearch backend instead of the in-built Lucene index. You can run it with:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.es.yml up
+```
+If you change backend, you need to rebuild the search index by going to Legacy UI -> Administration -> Search Index. Alternatively, you can rebuild the search index using the `searchindexupdate` REST endpoint.
+
+### Running with Grafana
+
+OpenMRS can run with Grafana for monitoring logs. You can run it with:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.grafana.yml up
+```
+Grafana will be available at http://localhost:3000. Use admin as username and see docker-compose.grafana.yml for the initial password.
+
+### Scheduler Dashboard
+
+The scheduler dashboard can be accessed at http://localhost:9000 by default (user: admin / passowrd: Admin123). It is enabled by default when running `docker compose up` command. It is configured in `docker-compose.override.yml`.
+
+If you want to enable it in other environments, you need to set the following properties in `openmrs-runtime.properties`:
+
+```bash
+jobrunr.dashboard.enabled=true
+jobrunr.dashboard.password=someStrongPassword
 ```
 
 ## Navigating the repository
@@ -173,8 +241,8 @@ If you haven't found what you were looking for refer to the [Module - wiki](http
 
 If you want to contribute please refer to these resources
 
-* [Getting Started as a Developer](https://wiki.openmrs.org/display/docs/Get+Started+as+a+Developer)
-* [How To Configure Your IDE](https://wiki.openmrs.org/display/docs/How-To+Setup+And+Use+Your+IDE)
+* [Getting Started as a Developer](https://openmrs.atlassian.net/wiki/spaces/docs/pages/25477022/Getting+Started+as+a+Developer)
+* [How To Configure Your IDE](https://openmrs.atlassian.net/wiki/spaces/Archives/pages/25506949/How-To+Setup+And+Use+Your+IDE)
 * [How To Make a Pull Request](https://wiki.openmrs.org/display/docs/Pull+Request+Tips)
 
 ### Wiki
@@ -204,7 +272,7 @@ Read the following sections to find out where you could help.
 
 Check out our [contributing guidelines](CONTRIBUTING.md), read through the [Developer guides](#developer-guides).
 
-After you've read up :eyeglasses: [grab an introductory issue](https://wiki.openmrs.org/display/docs/Contribute+as+a+Developer#ContributeasaDeveloper-Workonanissue) that is `Ready For Work`.
+After you've read up :eyeglasses: [grab an introductory issue](https://openmrs.atlassian.net/wiki/x/a8GEAQ) that is `Ready For Work`.
 
 ### Code Reviews
 
@@ -214,7 +282,7 @@ appreciated!
 
 Read
 
-https://wiki.openmrs.org/display/docs/Code+Review
+https://openmrs.atlassian.net/wiki/x/-r_EAQ
 
 and get started with re-:eyes: pull requests!
 
@@ -222,7 +290,7 @@ and get started with re-:eyes: pull requests!
 
 We use
 
-https://www.transifex.com/openmrs/OpenMRS/
+https://explore.transifex.com/openmrs/OpenMRS/
 
 to manage our translations.
 
@@ -237,7 +305,7 @@ the `messages_es.properties` file.
 
 If you would like to know how to help with translations see
 
-http://openmrs.org/join-the-community/translate/
+https://openmrs.org/get-involved/translate-openmrs/
 
 ## Issues
 
@@ -259,4 +327,3 @@ Talk to us on [OpenMRS Talk](https://talk.openmrs.org/)
 ## License
 
 [MPL 2.0 w/ HD](http://openmrs.org/license/) © [OpenMRS Inc.](http://www.openmrs.org/)
-

@@ -11,9 +11,12 @@ package org.openmrs.api.db.hibernate;
 
 import java.util.List;
 
-import org.hibernate.Criteria;
-import org.hibernate.Query;
-import org.hibernate.criterion.Restrictions;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Root;
+
+import org.hibernate.Session;
 import org.openmrs.BaseOpenmrsData;
 import org.openmrs.api.db.OpenmrsDataDAO;
 
@@ -21,63 +24,87 @@ import org.openmrs.api.db.OpenmrsDataDAO;
  * Abstract class implementing basic data access methods for BaseOpenmrsData persistents
  *
  * @since 1.10
- *
  * @param <T>
  */
 public class HibernateOpenmrsDataDAO<T extends BaseOpenmrsData> extends HibernateOpenmrsObjectDAO<T> implements OpenmrsDataDAO<T> {
-	
+
 	public HibernateOpenmrsDataDAO(Class<T> mappedClass) {
 		super();
 		this.mappedClass = mappedClass;
 	}
-	
+
+	/**
+	 * Gets the attribute name for the voided flag. Person maps it as "personVoided" in HBM XML, while
+	 * other entities use "voided" from BaseOpenmrsData.
+	 */
+	private String getVoidedAttributeName(Root<T> root) {
+		try {
+			root.get("voided");
+			return "voided";
+		} catch (IllegalArgumentException e) {
+			return "personVoided";
+		}
+	}
+
 	/**
 	 * @see org.openmrs.api.db.OpenmrsDataDAO#getAll(boolean)
 	 */
 	@Override
 	public List<T> getAll(boolean includeVoided) {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(mappedClass);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<T> cq = cb.createQuery(mappedClass);
+		Root<T> root = cq.from(mappedClass);
+
 		if (!includeVoided) {
-			crit.add(Restrictions.eq("voided", false));
+			cq.where(cb.isFalse(root.get(getVoidedAttributeName(root))));
 		}
-		
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.OpenmrsDataDAO#getAll(boolean, java.lang.Integer, java.lang.Integer)
 	 */
 	@Override
 	public List<T> getAll(boolean includeVoided, Integer firstResult, Integer maxResults) {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(mappedClass);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<T> cq = cb.createQuery(mappedClass);
+		Root<T> root = cq.from(mappedClass);
+
 		if (!includeVoided) {
-			crit.add(Restrictions.eq("voided", false));
+			cq.where(cb.isFalse(root.get(getVoidedAttributeName(root))));
 		}
-		crit.setFirstResult(firstResult);
-		crit.setMaxResults(maxResults);
-		
-		return crit.list();
-		
+
+		TypedQuery<T> query = session.createQuery(cq);
+		if (firstResult != null) {
+			query.setFirstResult(firstResult);
+		}
+		if (maxResults != null) {
+			query.setMaxResults(maxResults);
+		}
+		return query.getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.OpenmrsDataDAO#getAllCount(boolean)
 	 */
 	@Override
 	public int getAllCount(boolean includeVoided) {
-		
-		String hql = "select count(*)" + " from " + mappedClass;
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+		Root<T> root = cq.from(mappedClass);
+
+		cq.select(cb.count(root));
+
 		if (!includeVoided) {
-			hql += " where voided = false";
+			cq.where(cb.isFalse(root.get(getVoidedAttributeName(root))));
 		}
-		Query query = sessionFactory.getCurrentSession().createQuery(hql);
-		
-		Number count = (Number) query.uniqueResult();
-		
+
+		Long count = session.createQuery(cq).getSingleResult();
+
 		return count == null ? 0 : count.intValue();
 	}
-	
 }

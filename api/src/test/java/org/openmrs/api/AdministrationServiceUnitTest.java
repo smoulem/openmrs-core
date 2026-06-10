@@ -9,17 +9,6 @@
  */
 package org.openmrs.api;
 
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.contains;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Matchers.anyBoolean;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,43 +17,54 @@ import org.junit.jupiter.api.Test;
 import org.openmrs.api.db.AdministrationDAO;
 import org.openmrs.api.impl.AdministrationServiceImpl;
 
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 /**
  * Unit tests for {@link AdministrationService}.
  */
 public class AdministrationServiceUnitTest {
-	
+
 	private AdministrationDAO adminDAO;
-	
+
 	private EventListeners eventListeners;
-	
+
 	private AdministrationService adminService;
-	
+
 	@BeforeEach
 	public void setUp() {
-		
+
 		adminService = new AdministrationServiceImpl();
 		adminDAO = mock(AdministrationDAO.class);
 		adminService.setAdministrationDAO(adminDAO);
 		eventListeners = mock(EventListeners.class);
 		((AdministrationServiceImpl) adminService).setEventListeners(eventListeners);
 	}
-	
+
 	@Test
 	public void executeSQL_shouldReturnNullGivenNull() {
-		
+
 		adminService.executeSQL(null, true);
-		
+
 		verify(adminDAO, never()).executeSQL(anyString(), anyBoolean());
 	}
-	
+
 	@Test
 	public void executeSQL_shouldReturnNullGivenEmptyString() {
-		
+
 		adminService.executeSQL(" ", true);
-		
+
 		verify(adminDAO, never()).executeSQL(anyString(), anyBoolean());
 	}
-	
+
 	@Test
 	public void getGlobalPropertyValue_shouldFailIfDefaultValueIsNull() {
 
@@ -95,7 +95,7 @@ public class AdministrationServiceUnitTest {
 		adminService.addGlobalPropertyListener(listener);
 		assertThat(listeners.size(), is(1));
 		assertThat(listeners, contains(listener));
-		
+
 		adminService.removeGlobalPropertyListener(listener);
 
 		assertThat(listeners.size(), is(0));

@@ -20,22 +20,31 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
-import org.apache.commons.collections.CollectionUtils;
+import jakarta.persistence.Query;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+
 import org.apache.commons.lang3.StringUtils;
-import org.hibernate.Criteria;
 import org.hibernate.FlushMode;
-import org.hibernate.Query;
-import org.hibernate.SQLQuery;
+import org.hibernate.Session;
 import org.hibernate.SessionFactory;
-import org.hibernate.criterion.Criterion;
-import org.hibernate.criterion.MatchMode;
-import org.hibernate.criterion.Order;
-import org.hibernate.criterion.Projections;
-import org.hibernate.criterion.Restrictions;
-import org.hibernate.criterion.SimpleExpression;
-import org.hibernate.transform.DistinctRootEntityResultTransformer;
+import org.hibernate.query.MutationQuery;
+import org.hibernate.query.NativeQuery;
+import org.hibernate.search.engine.search.predicate.SearchPredicate;
+import org.hibernate.search.engine.search.predicate.dsl.BooleanPredicateClausesStep;
+import org.hibernate.search.engine.search.predicate.dsl.SearchPredicateFactory;
+import org.hibernate.search.engine.search.query.SearchQuery;
+import org.hibernate.search.mapper.orm.scope.SearchScope;
+import org.hibernate.search.mapper.orm.session.SearchSession;
 import org.openmrs.Concept;
 import org.openmrs.ConceptAnswer;
 import org.openmrs.ConceptAttribute;
@@ -50,6 +59,7 @@ import org.openmrs.ConceptName;
 import org.openmrs.ConceptNameTag;
 import org.openmrs.ConceptNumeric;
 import org.openmrs.ConceptProposal;
+import org.openmrs.ConceptReferenceRange;
 import org.openmrs.ConceptReferenceTerm;
 import org.openmrs.ConceptReferenceTermMap;
 import org.openmrs.ConceptSearchResult;
@@ -58,64 +68,83 @@ import org.openmrs.ConceptSource;
 import org.openmrs.ConceptStopWord;
 import org.openmrs.Drug;
 import org.openmrs.DrugIngredient;
-import org.openmrs.OpenmrsObject;
+import org.openmrs.DrugReferenceMap;
 import org.openmrs.api.APIException;
+import org.openmrs.api.ConceptNameType;
 import org.openmrs.api.ConceptService;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.ConceptDAO;
 import org.openmrs.api.db.DAOException;
-import org.openmrs.api.db.hibernate.search.LuceneQuery;
-import org.openmrs.collection.ListPart;
+import org.openmrs.api.db.hibernate.search.SearchQueryUnique;
+import org.openmrs.api.db.hibernate.search.session.SearchSessionFactory;
+import org.openmrs.parameter.ConceptSearchCriteria;
 import org.openmrs.util.ConceptMapTypeComparator;
 import org.openmrs.util.OpenmrsConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
+import org.springframework.util.CollectionUtils;
+
+import static java.util.stream.Collectors.toList;
 
 /**
  * The Hibernate class for Concepts, Drugs, and related classes. <br>
  * <br>
  * Use the {@link ConceptService} to access these methods
- * 
+ *
  * @see ConceptService
  */
+@Repository("conceptDAO")
 public class HibernateConceptDAO implements ConceptDAO {
-	
+
 	private static final Logger log = LoggerFactory.getLogger(HibernateConceptDAO.class);
-	
-	private SessionFactory sessionFactory;
-	
-	/**
-	 * Sets the session factory
-	 * 
-	 * @param sessionFactory
-	 */
-	public void setSessionFactory(SessionFactory sessionFactory) {
+
+	private static final String CONCEPT_REFERENCE_TERM = "conceptReferenceTerm";
+
+	private static final String CONCEPT_SOURCE = "conceptSource";
+
+	private static final String HL7_CODE = "hl7Code";
+
+	private final SessionFactory sessionFactory;
+
+	private final SearchSessionFactory searchSessionFactory;
+
+	@Autowired
+	public HibernateConceptDAO(SessionFactory sessionFactory, SearchSessionFactory searchSessionFactory) {
 		this.sessionFactory = sessionFactory;
+		this.searchSessionFactory = searchSessionFactory;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptComplex(java.lang.Integer)
 	 */
 	@Override
 	public ConceptComplex getConceptComplex(Integer conceptId) {
 		ConceptComplex cc;
-		Object obj = sessionFactory.getCurrentSession().get(ConceptComplex.class, conceptId);
+		Session session = sessionFactory.getCurrentSession();
+		Object obj = session.get(ConceptComplex.class, conceptId);
 		// If Concept has already been read & cached, we may get back a Concept instead of
 		// ConceptComplex.  If this happens, we need to clear the object from the cache
 		// and re-fetch it as a ConceptComplex
 		if (obj != null && !obj.getClass().equals(ConceptComplex.class)) {
 			// remove from cache
-			sessionFactory.getCurrentSession().evict(obj);
+			session.detach(obj);
+
 			// session.get() did not work here, we need to perform a query to get a ConceptComplex
-			Query query = sessionFactory.getCurrentSession().createQuery("from ConceptComplex where conceptId = :conceptId")
-			        .setParameter("conceptId", conceptId);
-			obj = query.uniqueResult();
+			CriteriaBuilder cb = session.getCriteriaBuilder();
+			CriteriaQuery<ConceptComplex> cq = cb.createQuery(ConceptComplex.class);
+			Root<ConceptComplex> root = cq.from(ConceptComplex.class);
+
+			cq.where(cb.equal(root.get("conceptId"), conceptId));
+
+			obj = session.createQuery(cq).uniqueResult();
 		}
 		cc = (ConceptComplex) obj;
-		
+
 		return cc;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConcept(org.openmrs.Concept)
 	 */
@@ -127,48 +156,55 @@ public class HibernateConceptDAO implements ConceptDAO {
 			// doesn't like to insert into concept_numeric but update concept in the
 			// same go.  It assumes that its either in both tables or no tables
 			insertRowIntoSubclassIfNecessary(concept);
+
+			// After insertRowIntoSubclassIfNecessary, the session may have been
+			// cleared. Use merge directly since the concept row already exists.
+			Session session = sessionFactory.getCurrentSession();
+			if (!session.contains(concept)) {
+				return (Concept) session.merge(concept);
+			}
+			return concept;
 		}
-		
-		sessionFactory.getCurrentSession().saveOrUpdate(concept);
-		return concept;
+
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), concept);
 	}
-	
+
 	/**
 	 * Convenience method that will check this concept for subtype values (ConceptNumeric,
-	 * ConceptDerived, etc) and insert a line into that subtable if needed. This prevents a
-	 * hibernate ConstraintViolationException
-	 * 
+	 * ConceptDerived, etc) and insert a line into that subtable if needed. This prevents a hibernate
+	 * ConstraintViolationException
+	 *
 	 * @param concept the concept that will be inserted
 	 */
 	private void insertRowIntoSubclassIfNecessary(Concept concept) {
-		
+
 		// check the concept_numeric table
 		if (concept instanceof ConceptNumeric) {
-			
+
 			String select = "SELECT 1 from concept_numeric WHERE concept_id = :conceptId";
-			Query query = sessionFactory.getCurrentSession().createSQLQuery(select);
-			query.setInteger("conceptId", concept.getConceptId());
-			
+			NativeQuery<Integer> selectQuery = sessionFactory.getCurrentSession().createNativeQuery(select, Integer.class);
+			selectQuery.setParameter("conceptId", concept.getConceptId());
+
 			// Converting to concept numeric:  A single concept row exists, but concept numeric has not been populated yet.
-			if (query.uniqueResult() == null) {
+			if (JpaUtils.getSingleResultOrNull(selectQuery) == null) {
 				// we have to evict the current concept out of the session because
 				// the user probably had to change the class of this object to get it
 				// to now be a numeric
 				// (must be done before the "insert into...")
 				sessionFactory.getCurrentSession().clear();
-				
+
 				//Just in case this was changed from concept_complex to numeric
 				//We need to add a delete line for each concept sub class that is not concept_numeric
 				deleteSubclassConcept("concept_complex", concept.getConceptId());
-				
+
 				String insert = "INSERT INTO concept_numeric (concept_id, allow_decimal) VALUES (:conceptId, false)";
-				query = sessionFactory.getCurrentSession().createSQLQuery(insert);
-				query.setInteger("conceptId", concept.getConceptId());
-				query.executeUpdate();
-				
+				MutationQuery insertQuery = sessionFactory.getCurrentSession().createNativeMutationQuery(insert);
+				insertQuery.setParameter("conceptId", concept.getConceptId());
+				insertQuery.executeUpdate();
+
 			} else {
 				// Converting from concept numeric:  The concept and concept numeric rows both exist, so we need to delete concept_numeric.
-				
+
 				// concept is changed from numeric to something else
 				// hence row should be deleted from the concept_numeric
 				if (!concept.isNumeric()) {
@@ -178,342 +214,361 @@ public class HibernateConceptDAO implements ConceptDAO {
 		}
 		// check the concept complex table
 		else if (concept instanceof ConceptComplex) {
-			
+
 			String select = "SELECT 1 FROM concept_complex WHERE concept_id = :conceptId";
-			Query query = sessionFactory.getCurrentSession().createSQLQuery(select);
-			query.setInteger("conceptId", concept.getConceptId());
-			
+			NativeQuery<Integer> selectQuery = sessionFactory.getCurrentSession().createNativeQuery(select, Integer.class);
+			selectQuery.setParameter("conceptId", concept.getConceptId());
+
 			// Converting to concept complex:  A single concept row exists, but concept complex has not been populated yet.
-			if (query.uniqueResult() == null) {
+			if (JpaUtils.getSingleResultOrNull(selectQuery) == null) {
 				// we have to evict the current concept out of the session because
 				// the user probably had to change the class of this object to get it
 				// to now be a ConceptComplex
 				// (must be done before the "insert into...")
 				sessionFactory.getCurrentSession().clear();
-				
+
 				//Just in case this was changed from concept_numeric to complex
 				//We need to add a delete line for each concept sub class that is not concept_complex
 				deleteSubclassConcept("concept_numeric", concept.getConceptId());
-				
+
 				// Add an empty row into the concept_complex table
 				String insert = "INSERT INTO concept_complex (concept_id) VALUES (:conceptId)";
-				query = sessionFactory.getCurrentSession().createSQLQuery(insert);
-				query.setInteger("conceptId", concept.getConceptId());
-				query.executeUpdate();
-				
+				MutationQuery insertQuery = sessionFactory.getCurrentSession().createNativeQuery(insert);
+				insertQuery.setParameter("conceptId", concept.getConceptId());
+				insertQuery.executeUpdate();
+
 			} else {
 				// Converting from concept complex:  The concept and concept complex rows both exist, so we need to delete the concept_complex row.
 				// no stub insert is needed because either a concept row doesn't exist OR a concept_complex row does exist
-				
+
 				// concept is changed from complex to something else
 				// hence row should be deleted from the concept_complex
 				if (!concept.isComplex()) {
 					deleteSubclassConcept("concept_complex", concept.getConceptId());
 				}
 			}
+		} else {
+			// Plain Concept (not a subclass): clean up any subclass rows that may exist
+			deleteSubclassConcept("concept_numeric", concept.getConceptId());
+			deleteSubclassConcept("concept_complex", concept.getConceptId());
 		}
 	}
-	
+
 	/**
 	 * Deletes a concept from a sub class table
-	 * 
+	 *
 	 * @param tableName the sub class table name
 	 * @param conceptId the concept id
 	 */
 	private void deleteSubclassConcept(String tableName, Integer conceptId) {
 		String delete = "DELETE FROM " + tableName + " WHERE concept_id = :conceptId";
-		Query query = sessionFactory.getCurrentSession().createSQLQuery(delete);
-		query.setInteger("conceptId", conceptId);
+		MutationQuery query = sessionFactory.getCurrentSession().createNativeMutationQuery(delete);
+		query.setParameter("conceptId", conceptId);
 		query.executeUpdate();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#purgeConcept(org.openmrs.Concept)
 	 */
 	@Override
 	public void purgeConcept(Concept concept) throws DAOException {
-		sessionFactory.getCurrentSession().delete(concept);
+		sessionFactory.getCurrentSession().remove(concept);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConcept(java.lang.Integer)
 	 */
 	@Override
 	public Concept getConcept(Integer conceptId) throws DAOException {
-		return (Concept) sessionFactory.getCurrentSession().get(Concept.class, conceptId);
+		return sessionFactory.getCurrentSession().get(Concept.class, conceptId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptName(java.lang.Integer)
 	 */
 	@Override
 	public ConceptName getConceptName(Integer conceptNameId) throws DAOException {
-		return (ConceptName) sessionFactory.getCurrentSession().get(ConceptName.class, conceptNameId);
+		return sessionFactory.getCurrentSession().get(ConceptName.class, conceptNameId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptAnswer(java.lang.Integer)
 	 */
 	@Override
 	public ConceptAnswer getConceptAnswer(Integer conceptAnswerId) throws DAOException {
-		return (ConceptAnswer) sessionFactory.getCurrentSession().get(ConceptAnswer.class, conceptAnswerId);
+		return sessionFactory.getCurrentSession().get(ConceptAnswer.class, conceptAnswerId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConcepts(java.lang.String, boolean, boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Concept> getAllConcepts(String sortBy, boolean asc, boolean includeRetired) throws DAOException {
-		
+
 		boolean isNameField = false;
-		
+
 		try {
 			Concept.class.getDeclaredField(sortBy);
-		}
-		catch (NoSuchFieldException e) {
+		} catch (NoSuchFieldException e) {
 			try {
 				ConceptName.class.getDeclaredField(sortBy);
 				isNameField = true;
-			}
-			catch (NoSuchFieldException e2) {
+			} catch (NoSuchFieldException e2) {
 				sortBy = "conceptId";
 			}
 		}
-		
-		String hql = "";
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<Concept> root = cq.from(Concept.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
+		// When sorting by a ConceptName field, join to names filtered on FULLY_SPECIFIED
+		// to avoid duplicates (each concept should have exactly one fully specified name)
+		Join<Concept, ConceptName> namesJoin = null;
 		if (isNameField) {
-			hql += "select concept";
+			namesJoin = root.join("names", JoinType.LEFT);
+			predicates.add(cb.equal(namesJoin.get("conceptNameType"), ConceptNameType.FULLY_SPECIFIED));
 		}
-		
-		hql += " from Concept as concept";
-		boolean hasWhereClause = false;
-		if (isNameField) {
-			hasWhereClause = true;
-			//This assumes every concept has a unique(avoid duplicates) fully specified name
-			//which should be true for a clean concept dictionary
-			hql += " left join concept.names as names where names.conceptNameType = 'FULLY_SPECIFIED'";
-		}
-		
+
 		if (!includeRetired) {
-			if (hasWhereClause) {
-				hql += " and";
-			} else {
-				hql += " where";
-			}
-			hql += " concept.retired = false";
-			
+			predicates.add(cb.isFalse(root.get("retired")));
 		}
-		
+
+		cq.select(root).where(predicates.toArray(new Predicate[0]));
+
 		if (isNameField) {
-			hql += " order by names." + sortBy;
+			cq.orderBy(asc ? cb.asc(namesJoin.get(sortBy)) : cb.desc(namesJoin.get(sortBy)));
 		} else {
-			hql += " order by concept." + sortBy;
+			cq.orderBy(asc ? cb.asc(root.get(sortBy)) : cb.desc(root.get(sortBy)));
 		}
-		
-		hql += asc ? " asc" : " desc";
-		Query query = sessionFactory.getCurrentSession().createQuery(hql);
-		return (List<Concept>) query.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveDrug(org.openmrs.Drug)
 	 */
 	@Override
 	public Drug saveDrug(Drug drug) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(drug);
-		return drug;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), drug);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrug(java.lang.Integer)
 	 */
 	@Override
 	public Drug getDrug(Integer drugId) throws DAOException {
-		return (Drug) sessionFactory.getCurrentSession().get(Drug.class, drugId);
+		return sessionFactory.getCurrentSession().get(Drug.class, drugId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrugs(java.lang.String, org.openmrs.Concept, boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Drug> getDrugs(String drugName, Concept concept, boolean includeRetired) throws DAOException {
-		Criteria searchCriteria = sessionFactory.getCurrentSession().createCriteria(Drug.class, "drug");
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Drug> cq = cb.createQuery(Drug.class);
+		Root<Drug> drugRoot = cq.from(Drug.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (!includeRetired) {
-			searchCriteria.add(Restrictions.eq("drug.retired", false));
+			predicates.add(cb.isFalse(drugRoot.get("retired")));
 		}
+
 		if (concept != null) {
-			searchCriteria.add(Restrictions.eq("drug.concept", concept));
+			predicates.add(cb.equal(drugRoot.get("concept"), concept));
 		}
+
 		if (drugName != null) {
-			SimpleExpression eq = Restrictions.eq("drug.name", drugName);
 			if (Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()) {
-				eq = eq.ignoreCase();
+				predicates.add(cb.equal(cb.lower(drugRoot.get("name")), MatchMode.EXACT.toLowerCasePattern(drugName)));
+			} else {
+				predicates.add(cb.equal(drugRoot.get("name"), MatchMode.EXACT.toCaseSensitivePattern(drugName)));
 			}
-			searchCriteria.add(eq);
 		}
-		return (List<Drug>) searchCriteria.list();
+
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrugsByIngredient(org.openmrs.Concept)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Drug> getDrugsByIngredient(Concept ingredient) {
-		Criteria searchDrugCriteria = sessionFactory.getCurrentSession().createCriteria(Drug.class, "drug");
-		Criterion rhs = Restrictions.eq("drug.concept", ingredient);
-		searchDrugCriteria.createAlias("ingredients", "ingredients");
-		Criterion lhs = Restrictions.eq("ingredients.ingredient", ingredient);
-		searchDrugCriteria.add(Restrictions.or(lhs, rhs));
-		
-		return (List<Drug>) searchDrugCriteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Drug> cq = cb.createQuery(Drug.class);
+		Root<Drug> drugRoot = cq.from(Drug.class);
+
+		Join<Drug, DrugIngredient> ingredientJoin = drugRoot.join("ingredients");
+
+		Predicate rhs = cb.equal(drugRoot.get("concept"), ingredient);
+		Predicate lhs = cb.equal(ingredientJoin.get("ingredient"), ingredient);
+
+		cq.where(cb.or(lhs, rhs));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrugs(java.lang.String)
 	 */
 	@Override
 	public List<Drug> getDrugs(final String phrase) throws DAOException {
-		LuceneQuery<Drug> drugQuery = newDrugQuery(phrase, true, false, Context.getLocale(), false, null, false);
-		
+		SearchQuery<Drug> drugQuery = newDrugQuery(phrase, true, false, Context.getLocale(), false, null, false);
+
 		if (drugQuery == null) {
 			return Collections.emptyList();
 		}
-		
-		return drugQuery.list();
+
+		return drugQuery.fetchAllHits();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptClass(java.lang.Integer)
 	 */
 	@Override
 	public ConceptClass getConceptClass(Integer i) throws DAOException {
-		return (ConceptClass) sessionFactory.getCurrentSession().get(ConceptClass.class, i);
+		return sessionFactory.getCurrentSession().get(ConceptClass.class, i);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptClasses(java.lang.String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptClass> getConceptClasses(String name) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptClass.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptClass> cq = cb.createQuery(ConceptClass.class);
+		Root<ConceptClass> root = cq.from(ConceptClass.class);
+
 		if (name != null) {
-			crit.add(Restrictions.eq("name", name));
+			cq.where(cb.equal(root.get("name"), name));
 		}
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptClasses(boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptClass> getAllConceptClasses(boolean includeRetired) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptClass.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptClass> cq = cb.createQuery(ConceptClass.class);
+		Root<ConceptClass> root = cq.from(ConceptClass.class);
+
 		// Minor bug - was assigning includeRetired instead of evaluating
 		if (!includeRetired) {
-			crit.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(root.get("retired")));
 		}
-		
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptClass(org.openmrs.ConceptClass)
 	 */
 	@Override
 	public ConceptClass saveConceptClass(ConceptClass cc) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(cc);
-		return cc;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), cc);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#purgeConceptClass(org.openmrs.ConceptClass)
 	 */
 	@Override
 	public void purgeConceptClass(ConceptClass cc) throws DAOException {
-		sessionFactory.getCurrentSession().delete(cc);
+		sessionFactory.getCurrentSession().remove(cc);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#deleteConceptNameTag(ConceptNameTag)
 	 */
 	@Override
 	public void deleteConceptNameTag(ConceptNameTag cnt) throws DAOException {
-		sessionFactory.getCurrentSession().delete(cnt);
+		sessionFactory.getCurrentSession().remove(cnt);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptDatatype(java.lang.Integer)
 	 */
 	@Override
 	public ConceptDatatype getConceptDatatype(Integer i) {
-		return (ConceptDatatype) sessionFactory.getCurrentSession().get(ConceptDatatype.class, i);
+		return sessionFactory.getCurrentSession().get(ConceptDatatype.class, i);
 	}
-	
-	/**
-	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptDatatypes(boolean)
-	 */
+
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptDatatype> getAllConceptDatatypes(boolean includeRetired) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptDatatype.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptDatatype> cq = cb.createQuery(ConceptDatatype.class);
+		Root<ConceptDatatype> root = cq.from(ConceptDatatype.class);
+
 		if (!includeRetired) {
-			crit.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(root.get("retired")));
 		}
-		
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @param name the name of the ConceptDatatype
 	 * @return a List of ConceptDatatype whose names start with the passed name
 	 */
-	@SuppressWarnings("unchecked")
 	public List<ConceptDatatype> getConceptDatatypes(String name) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptDatatype.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptDatatype> cq = cb.createQuery(ConceptDatatype.class);
+		Root<ConceptDatatype> root = cq.from(ConceptDatatype.class);
+
 		if (name != null) {
-			crit.add(Restrictions.like("name", name, MatchMode.START));
+			cq.where(cb.like(root.get("name"), MatchMode.START.toCaseSensitivePattern(name)));
 		}
-		
-		return crit.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptDatatypeByName(String)
 	 */
 	@Override
 	public ConceptDatatype getConceptDatatypeByName(String name) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptDatatype.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptDatatype> cq = cb.createQuery(ConceptDatatype.class);
+		Root<ConceptDatatype> root = cq.from(ConceptDatatype.class);
+
 		if (name != null) {
-			criteria.add(Restrictions.eq("name", name));
+			cq.where(cb.equal(root.get("name"), name));
 		}
-		return (ConceptDatatype) criteria.uniqueResult();
+		return session.createQuery(cq).uniqueResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptDatatype(org.openmrs.ConceptDatatype)
 	 */
 	@Override
 	public ConceptDatatype saveConceptDatatype(ConceptDatatype cd) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(cd);
-		return cd;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), cd);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#purgeConceptDatatype(org.openmrs.ConceptDatatype)
 	 */
 	@Override
 	public void purgeConceptDatatype(ConceptDatatype cd) throws DAOException {
-		sessionFactory.getCurrentSession().delete(cd);
+		sessionFactory.getCurrentSession().remove(cd);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptNumeric(java.lang.Integer)
 	 */
@@ -530,13 +585,13 @@ public class HibernateConceptDAO implements ConceptDAO {
 			// session.get() did not work here, we need to perform a query to get a ConceptNumeric
 			Query query = sessionFactory.getCurrentSession().createQuery("from ConceptNumeric where conceptId = :conceptId")
 			        .setParameter("conceptId", i);
-			obj = query.uniqueResult();
+			obj = JpaUtils.getSingleResultOrNull(query);
 		}
 		cn = (ConceptNumeric) obj;
-		
+
 		return cn;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConcepts(java.lang.String, java.util.Locale, boolean,
 	 *      java.util.List, java.util.List)
@@ -544,125 +599,106 @@ public class HibernateConceptDAO implements ConceptDAO {
 	@Override
 	public List<Concept> getConcepts(final String name, final Locale loc, final boolean searchOnPhrase,
 	        final List<ConceptClass> classes, final List<ConceptDatatype> datatypes) throws DAOException {
-		
+
 		final Locale locale;
 		if (loc == null) {
 			locale = Context.getLocale();
 		} else {
 			locale = loc;
 		}
-		
-		LuceneQuery<ConceptName> conceptNameQuery = newConceptNameLuceneQuery(name, !searchOnPhrase,
-				Collections.singletonList(locale),
-		    false, false, classes, null, datatypes, null, null);
-		
-		List<ConceptName> names = conceptNameQuery.list();
 
-		return new ArrayList<>(transformNamesToConcepts(names));
+		return SearchQueryUnique
+		        .search(searchSessionFactory,
+		            SearchQueryUnique.newQuery(
+		                ConceptName.class, f -> newConceptNamePredicate(f, name, !searchOnPhrase,
+		                    Collections.singletonList(locale), false, false, classes, null, datatypes, null, null),
+		                "concept.conceptId", ConceptName::getConcept));
 	}
-	
+
 	private LinkedHashSet<Concept> transformNamesToConcepts(List<ConceptName> names) {
 		LinkedHashSet<Concept> concepts = new LinkedHashSet<>();
-		
+
 		for (ConceptName name : names) {
 			concepts.add(name.getConcept());
 		}
-		
+
 		return concepts;
 	}
-	
-	private String newConceptNameQuery(final String name, final boolean searchKeywords, final Set<Locale> locales,
-	        final boolean searchExactLocale) {
-		final String escapedName = LuceneQuery.escapeQuery(name).replace("AND", "and").replace("OR", "or").replace("NOT", "not");
-		final List<String> tokenizedName = tokenizeConceptName(escapedName, locales);
-		
-		final StringBuilder query = new StringBuilder();
-		
-		query.append("(concept.conceptMappings.conceptReferenceTerm.code:(").append(escapedName).append(")^0.4 OR (");
-		final StringBuilder nameQuery = newNameQuery(tokenizedName, escapedName, searchKeywords);
-		query.append(nameQuery);
-		query.append(" localePreferred:true)^0.4 OR (");
-		query.append(nameQuery);
-		query.append(")^0.2)");
-		
-		List<String> localeQueries = new ArrayList<>();
-		for (Locale locale : locales) {
+
+	private SearchPredicate newConceptNameQuery(SearchPredicateFactory f, final String name, final boolean searchKeywords,
+	        final Collection<Locale> locales, final boolean searchExactLocale) {
+		return f.bool().with(b -> {
 			if (searchExactLocale) {
-				localeQueries.add(locale.toString());
+				b.must(f.terms().field("locale").matchingAny(locales));
 			} else {
-				String localeQuery = locale.getLanguage() + "* ";
-				if (!StringUtils.isBlank(locale.getCountry())) {
-					localeQuery += " OR " + locale + "^2 ";
-				}
-				localeQueries.add(localeQuery);
+				b.must(f.bool().with(bb -> {
+					for (Locale locale : locales) {
+						bb.should(f.wildcard().field("locale").matching(locale.getLanguage() + "*"));
+						if (!StringUtils.isBlank(locale.getCountry())) {
+							bb.should(f.match().field("locale").matching(locale).boost(2f));
+						}
+					}
+				}));
 			}
-		}
-		query.append(" locale:(");
-		query.append(StringUtils.join(localeQueries, " OR "));
-		query.append(")");
-		query.append(" voided:false");
-		
-		return query.toString();
+			b.filter(f.match().field("voided").matching(false));
+
+			b.must(f.bool().with(bb -> {
+				List<String> tokenizedName = tokenizeName(name, locales);
+				BooleanPredicateClausesStep<?, ?> nameQuery = newNameQuery(f, tokenizedName, name, searchKeywords);
+
+				bb.should(f.match().field("concept.conceptMappings.conceptReferenceTerm.code").matching(name).boost(10f));
+				bb.should(f.and().add(nameQuery).add(f.match().field("localePreferred").matching(true)).boost(2f));
+				bb.should(nameQuery);
+			}));
+		}).toPredicate();
 	}
-	
-	private StringBuilder newNameQuery(final List<String> tokenizedName, final String escapedName,
-	        final boolean searchKeywords) {
-		final StringBuilder query = new StringBuilder();
-		query.append("(");
-		if (searchKeywords) {
-			//Put exact phrase higher
-			query.append(" name:(\"").append(escapedName).append("\")^0.7");
-			
-			if (!tokenizedName.isEmpty()) {
-				query.append(" OR (");
-				for (String token : tokenizedName) {
-					query.append(" (name:(");
-					
-					//Include exact
-					query.append(token);
-					query.append(")^0.6 OR name:(");
-					
-					//Include partial
-					query.append(token);
-					query.append("*)^0.3 OR name:(");
-					
-					//Include similar
-					query.append(token);
-					query.append("~0.8)^0.1)");
+
+	private BooleanPredicateClausesStep<?, ?> newNameQuery(SearchPredicateFactory f, final List<String> tokenizedName,
+	        final String name, final boolean searchKeywords) {
+		return f.bool().with(b -> {
+			b.minimumShouldMatchNumber(1);
+			b.should(f.phrase().field("name").matching(name).boost(8f));
+			if (searchKeywords) {
+				if (!tokenizedName.isEmpty()) {
+					b.should(f.bool().with(bb -> {
+						for (String token : tokenizedName) {
+							bb.must(f.bool().with(bbb -> {
+								bbb.minimumShouldMatchNumber(1);
+								bbb.should(f.match().field("name").matching(token).boost(3f));
+								bbb.should(f.wildcard().field("name").matching(token + "*").boost(2f));
+								bbb.should(f.match().field("name").matching(token).fuzzy(1, 3));
+							}));
+						}
+					}));
 				}
-				query.append(")^0.3");
 			}
-		} else {
-			query.append(" name:\"").append(escapedName).append("\"");
-		}
-		query.append(")");
-		return query;
+		});
 	}
-	
-	private List<String> tokenizeConceptName(final String escapedName, final Set<Locale> locales) {
+
+	private List<String> tokenizeName(final String escapedName, final Collection<Locale> locales) {
 		List<String> words = new ArrayList<>(Arrays.asList(escapedName.trim().split(" ")));
-		
+
 		Set<String> stopWords = new HashSet<>();
 		for (Locale locale : locales) {
 			stopWords.addAll(Context.getConceptService().getConceptStopWords(locale));
 		}
-		
+
 		List<String> tokenizedName = new ArrayList<>();
-		
+
 		for (String word : words) {
 			word = word.trim();
-			
+
 			if (!word.isEmpty() && !stopWords.contains(word.toUpperCase())) {
 				tokenizedName.add(word);
 			}
 		}
-		
+
 		return tokenizedName;
 	}
-	
+
 	/**
 	 * gets questions for the given answer concept
-	 * 
+	 *
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptsByAnswer(org.openmrs.Concept)
 	 */
 	@Override
@@ -671,153 +707,190 @@ public class HibernateConceptDAO implements ConceptDAO {
 		String q = "select c from Concept c join c.answers ca where ca.answerConcept = :answer";
 		Query query = sessionFactory.getCurrentSession().createQuery(q);
 		query.setParameter("answer", concept);
-		
-		return query.list();
+
+		return query.getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getPrevConcept(org.openmrs.Concept)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public Concept getPrevConcept(Concept c) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<Concept> root = cq.from(Concept.class);
+
 		Integer i = c.getConceptId();
-		
-		List<Concept> concepts = sessionFactory.getCurrentSession().createCriteria(Concept.class).add(
-		    Restrictions.lt("conceptId", i)).addOrder(Order.desc("conceptId")).setFetchSize(1).list();
-		
+
+		cq.where(cb.lessThan(root.get("conceptId"), i));
+		cq.orderBy(cb.desc(root.get("conceptId")));
+
+		List<Concept> concepts = session.createQuery(cq).setMaxResults(1).getResultList();
+
 		if (concepts.isEmpty()) {
 			return null;
 		}
+
 		return concepts.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getNextConcept(org.openmrs.Concept)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public Concept getNextConcept(Concept c) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<Concept> root = cq.from(Concept.class);
+
 		Integer i = c.getConceptId();
-		
-		List<Concept> concepts = sessionFactory.getCurrentSession().createCriteria(Concept.class).add(
-		    Restrictions.gt("conceptId", i)).addOrder(Order.asc("conceptId")).setMaxResults(1).list();
-		
+
+		cq.where(cb.greaterThan(root.get("conceptId"), i));
+		cq.orderBy(cb.asc(root.get("conceptId")));
+
+		List<Concept> concepts = session.createQuery(cq).setMaxResults(1).getResultList();
+
 		if (concepts.isEmpty()) {
 			return null;
 		}
+
 		return concepts.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptsWithDrugsInFormulary()
 	 */
 	@Override
 	@SuppressWarnings("unchecked")
 	public List<Concept> getConceptsWithDrugsInFormulary() {
-		Query query = sessionFactory.getCurrentSession().createQuery(
-		    "select distinct concept from Drug d where d.retired = false");
-		return query.list();
+		Query query = sessionFactory.getCurrentSession()
+		        .createQuery("select distinct concept from Drug d where d.retired = false");
+		return query.getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#purgeDrug(org.openmrs.Drug)
 	 */
 	@Override
 	public void purgeDrug(Drug drug) throws DAOException {
-		sessionFactory.getCurrentSession().delete(drug);
+		sessionFactory.getCurrentSession().remove(drug);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptProposal(org.openmrs.ConceptProposal)
 	 */
 	@Override
 	public ConceptProposal saveConceptProposal(ConceptProposal cp) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(cp);
-		return cp;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), cp);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#purgeConceptProposal(org.openmrs.ConceptProposal)
 	 */
 	@Override
 	public void purgeConceptProposal(ConceptProposal cp) throws DAOException {
-		sessionFactory.getCurrentSession().delete(cp);
+		sessionFactory.getCurrentSession().remove(cp);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptProposals(boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptProposal> getAllConceptProposals(boolean includeCompleted) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptProposal.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptProposal> cq = cb.createQuery(ConceptProposal.class);
+		Root<ConceptProposal> root = cq.from(ConceptProposal.class);
+
 		if (!includeCompleted) {
-			crit.add(Restrictions.eq("state", OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED));
+			cq.where(cb.equal(root.get("state"), OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED));
 		}
-		crit.addOrder(Order.asc("originalText"));
-		return crit.list();
+		cq.orderBy(cb.asc(root.get("originalText")));
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptProposal(java.lang.Integer)
 	 */
 	@Override
 	public ConceptProposal getConceptProposal(Integer conceptProposalId) throws DAOException {
-		return (ConceptProposal) sessionFactory.getCurrentSession().get(ConceptProposal.class, conceptProposalId);
+		return sessionFactory.getCurrentSession().get(ConceptProposal.class, conceptProposalId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptProposals(java.lang.String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptProposal> getConceptProposals(String text) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptProposal.class);
-		crit.add(Restrictions.eq("state", OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED));
-		crit.add(Restrictions.eq("originalText", text));
-		return crit.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptProposal> cq = cb.createQuery(ConceptProposal.class);
+		Root<ConceptProposal> root = cq.from(ConceptProposal.class);
+
+		Predicate stateCondition = cb.equal(root.get("state"), OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED);
+		Predicate textCondition = cb.equal(root.get("originalText"), text);
+
+		cq.where(cb.and(stateCondition, textCondition));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getProposedConcepts(java.lang.String)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Concept> getProposedConcepts(String text) throws DAOException {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptProposal.class);
-		crit.add(Restrictions.ne("state", OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED));
-		crit.add(Restrictions.eq("originalText", text));
-		crit.add(Restrictions.isNotNull("mappedConcept"));
-		crit.setProjection(Projections.distinct(Projections.property("mappedConcept")));
-		
-		return crit.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<ConceptProposal> root = cq.from(ConceptProposal.class);
+
+		Predicate stateNotEqual = cb.notEqual(root.get("state"), OpenmrsConstants.CONCEPT_PROPOSAL_UNMAPPED);
+		Predicate originalTextEqual = cb.equal(root.get("originalText"), text);
+		Predicate mappedConceptNotNull = cb.isNotNull(root.get("mappedConcept"));
+
+		cq.select(root.get("mappedConcept")).distinct(true);
+		cq.where(stateNotEqual, originalTextEqual, mappedConceptNotNull);
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptSetsByConcept(org.openmrs.Concept)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptSet> getConceptSetsByConcept(Concept concept) {
-		return sessionFactory.getCurrentSession().createCriteria(ConceptSet.class).add(
-		    Restrictions.eq("conceptSet", concept)).addOrder(Order.asc("sortWeight")).list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSet> cq = cb.createQuery(ConceptSet.class);
+		Root<ConceptSet> root = cq.from(ConceptSet.class);
+
+		cq.where(cb.equal(root.get("conceptSet"), concept));
+		cq.orderBy(cb.asc(root.get("sortWeight")));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getSetsContainingConcept(org.openmrs.Concept)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptSet> getSetsContainingConcept(Concept concept) {
-		return sessionFactory.getCurrentSession().createCriteria(ConceptSet.class).add(Restrictions.eq("concept", concept))
-		        .list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSet> cq = cb.createQuery(ConceptSet.class);
+		Root<ConceptSet> root = cq.from(ConceptSet.class);
+
+		cq.where(cb.equal(root.get("concept"), concept));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * returns a list of n-generations of parents of a concept in a concept set
-	 * 
+	 *
 	 * @param current
 	 * @return List&lt;Concept&gt;
 	 * @throws DAOException
@@ -826,9 +899,9 @@ public class HibernateConceptDAO implements ConceptDAO {
 	private List<Concept> getParents(Concept current) throws DAOException {
 		List<Concept> parents = new ArrayList<>();
 		if (current != null) {
-			Query query = sessionFactory.getCurrentSession().createQuery(
-			    "from Concept c join c.conceptSets sets where sets.concept = ?").setEntity(0, current);
-			List<Concept> immedParents = query.list();
+			Query query = sessionFactory.getCurrentSession()
+			        .createQuery("from Concept c join c.conceptSets sets where sets.concept = ?").setParameter(0, current);
+			List<Concept> immedParents = query.getResultList();
 			for (Concept c : immedParents) {
 				parents.addAll(getParents(c));
 			}
@@ -838,50 +911,55 @@ public class HibernateConceptDAO implements ConceptDAO {
 				for (Concept c : parents) {
 					log.debug("id: {}", c.getConceptId());
 				}
-			}	
+			}
 		}
 		return parents;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getLocalesOfConceptNames()
 	 */
 	@Override
 	public Set<Locale> getLocalesOfConceptNames() {
 		Set<Locale> locales = new HashSet<>();
-		
+
 		Query query = sessionFactory.getCurrentSession().createQuery("select distinct locale from ConceptName");
-		
-		for (Object locale : query.list()) {
+
+		for (Object locale : query.getResultList()) {
 			locales.add((Locale) locale);
 		}
-		
+
 		return locales;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptNameTag(java.lang.Integer)
 	 */
 	@Override
 	public ConceptNameTag getConceptNameTag(Integer i) {
-		return (ConceptNameTag) sessionFactory.getCurrentSession().get(ConceptNameTag.class, i);
+		return sessionFactory.getCurrentSession().get(ConceptNameTag.class, i);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptNameTagByName(java.lang.String)
 	 */
 	@Override
 	public ConceptNameTag getConceptNameTagByName(String name) {
-		Criteria crit = sessionFactory.getCurrentSession().createCriteria(ConceptNameTag.class).add(
-		    Restrictions.eq("tag", name));
-		
-		if (crit.list().isEmpty()) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptNameTag> cq = cb.createQuery(ConceptNameTag.class);
+		Root<ConceptNameTag> root = cq.from(ConceptNameTag.class);
+
+		cq.where(cb.equal(root.get("tag"), name));
+
+		List<ConceptNameTag> conceptNameTags = session.createQuery(cq).getResultList();
+		if (conceptNameTags.isEmpty()) {
 			return null;
 		}
-		
-		return (ConceptNameTag) crit.list().get(0);
+
+		return conceptNameTags.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptNameTags()
 	 */
@@ -890,49 +968,49 @@ public class HibernateConceptDAO implements ConceptDAO {
 	public List<ConceptNameTag> getAllConceptNameTags() {
 		return sessionFactory.getCurrentSession().createQuery("from ConceptNameTag cnt order by cnt.tag").list();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptSource(java.lang.Integer)
 	 */
 	@Override
 	public ConceptSource getConceptSource(Integer conceptSourceId) {
-		return (ConceptSource) sessionFactory.getCurrentSession().get(ConceptSource.class, conceptSourceId);
+		return sessionFactory.getCurrentSession().get(ConceptSource.class, conceptSourceId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptSources(boolean)
 	 */
-	
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptSource> getAllConceptSources(boolean includeRetired) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptSource.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSource> cq = cb.createQuery(ConceptSource.class);
+		Root<ConceptSource> root = cq.from(ConceptSource.class);
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(root.get("retired")));
 		}
-		
-		return criteria.list();
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#deleteConceptSource(org.openmrs.ConceptSource)
 	 */
 	@Override
 	public ConceptSource deleteConceptSource(ConceptSource cs) throws DAOException {
-		sessionFactory.getCurrentSession().delete(cs);
+		sessionFactory.getCurrentSession().remove(cs);
 		return cs;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptSource(org.openmrs.ConceptSource)
 	 */
 	@Override
 	public ConceptSource saveConceptSource(ConceptSource conceptSource) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(conceptSource);
-		return conceptSource;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), conceptSource);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptNameTag(org.openmrs.ConceptNameTag)
 	 */
@@ -941,28 +1019,27 @@ public class HibernateConceptDAO implements ConceptDAO {
 		if (nameTag == null) {
 			return null;
 		}
-		
-		sessionFactory.getCurrentSession().saveOrUpdate(nameTag);
-		return nameTag;
+
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), nameTag);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getMaxConceptId()
 	 */
 	public Integer getMinConceptId() {
 		Query query = sessionFactory.getCurrentSession().createQuery("select min(conceptId) from Concept");
-		return (Integer) query.uniqueResult();
+		return JpaUtils.getSingleResultOrNull(query);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getMaxConceptId()
 	 */
 	@Override
 	public Integer getMaxConceptId() {
 		Query query = sessionFactory.getCurrentSession().createQuery("select max(conceptId) from Concept");
-		return (Integer) query.uniqueResult();
+		return JpaUtils.getSingleResultOrNull(query);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#conceptIterator()
 	 */
@@ -970,21 +1047,21 @@ public class HibernateConceptDAO implements ConceptDAO {
 	public Iterator<Concept> conceptIterator() {
 		return new ConceptIterator();
 	}
-	
+
 	/**
 	 * An iterator that loops over all concepts in the dictionary one at a time
 	 */
 	private class ConceptIterator implements Iterator<Concept> {
-		
+
 		Concept currentConcept = null;
-		
+
 		Concept nextConcept;
-		
+
 		public ConceptIterator() {
 			final int firstConceptId = getMinConceptId();
 			nextConcept = getConcept(firstConceptId);
 		}
-		
+
 		/**
 		 * @see java.util.Iterator#hasNext()
 		 */
@@ -992,7 +1069,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 		public boolean hasNext() {
 			return nextConcept != null;
 		}
-		
+
 		/**
 		 * @see java.util.Iterator#next()
 		 */
@@ -1001,13 +1078,13 @@ public class HibernateConceptDAO implements ConceptDAO {
 			if (currentConcept != null) {
 				sessionFactory.getCurrentSession().evict(currentConcept);
 			}
-			
+
 			currentConcept = nextConcept;
 			nextConcept = getNextConcept(currentConcept);
-			
+
 			return currentConcept;
 		}
-		
+
 		/**
 		 * @see java.util.Iterator#remove()
 		 */
@@ -1015,30 +1092,56 @@ public class HibernateConceptDAO implements ConceptDAO {
 		public void remove() {
 			throw new UnsupportedOperationException();
 		}
-		
+
 	}
 
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptsByMapping(String, String, boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	@Deprecated
 	public List<Concept> getConceptsByMapping(String code, String sourceName, boolean includeRetired) {
-		Criteria criteria = createSearchConceptMapCriteria(code, sourceName, includeRetired);
-		criteria.setProjection(Projections.property("concept"));
-		return (List<Concept>) criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<ConceptMap> root = cq.from(ConceptMap.class);
+
+		List<Predicate> predicates = createSearchConceptMapCriteria(cb, root, code, sourceName, includeRetired);
+
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		cq.select(root.get("concept"));
+
+		Join<ConceptMap, Concept> conceptJoin = root.join("concept");
+		if (includeRetired) {
+			cq.orderBy(cb.asc(conceptJoin.get("retired")));
+		}
+
+		return session.createQuery(cq).getResultList().stream().distinct().collect(toList());
 	}
 
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptIdsByMapping(String, String, boolean)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<Integer> getConceptIdsByMapping(String code, String sourceName, boolean includeRetired) {
-		Criteria criteria = createSearchConceptMapCriteria(code, sourceName, includeRetired);
-		criteria.setProjection(Projections.property("concept.conceptId"));
-		return (List<Integer>) criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Integer> cq = cb.createQuery(Integer.class);
+		Root<ConceptMap> root = cq.from(ConceptMap.class);
+
+		List<Predicate> predicates = createSearchConceptMapCriteria(cb, root, code, sourceName, includeRetired);
+
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		cq.select(root.get("concept").get("conceptId"));
+
+		Join<ConceptMap, Concept> conceptJoin = root.join("concept");
+		if (includeRetired) {
+			cq.orderBy(cb.asc(conceptJoin.get("retired")));
+		}
+
+		return session.createQuery(cq).getResultList().stream().distinct().collect(toList());
 	}
 
 	/**
@@ -1046,137 +1149,242 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public Concept getConceptByUuid(String uuid) {
-		return (Concept) sessionFactory.getCurrentSession().createQuery("from Concept c where c.uuid = :uuid").setString(
-		    "uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, Concept.class, uuid);
 	}
-	
+
+	/**
+	 * @see org.openmrs.api.db.ConceptDAO#getConcepts(ConceptSearchCriteria)
+	 */
+	@Override
+	public List<Concept> getConcepts(ConceptSearchCriteria criteria) {
+		if (criteria == null) {
+			return Collections.emptyList();
+		}
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<Concept> root = cq.from(Concept.class);
+
+		List<Predicate> orPredicates = new ArrayList<>();
+
+		if (criteria.getUuids() != null && !criteria.getUuids().isEmpty()) {
+			orPredicates.add(root.get("uuid").in(criteria.getUuids()));
+		}
+
+		if (criteria.getConceptIds() != null && !criteria.getConceptIds().isEmpty()) {
+			orPredicates.add(root.get("conceptId").in(criteria.getConceptIds()));
+		}
+
+		if (criteria.getMappings() != null && !criteria.getMappings().isEmpty()) {
+			boolean caseSensitive = Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive();
+			for (String mapping : criteria.getMappings()) {
+				buildMappingExistsPredicate(cq, root, cb, mapping, caseSensitive).ifPresent(orPredicates::add);
+			}
+		}
+
+		if (criteria.getNames() != null && !criteria.getNames().isEmpty()) {
+			boolean caseSensitive = Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive();
+			Locale locale = Context.getLocale();
+			Locale language = new Locale(locale.getLanguage() + "%");
+			for (String name : criteria.getNames()) {
+				orPredicates.add(buildNameExistsPredicate(cq, root, cb, name, caseSensitive, locale, language));
+			}
+		}
+
+		if (orPredicates.isEmpty()) {
+			return new ArrayList<>();
+		}
+
+		Predicate combined = cb.or(orPredicates.toArray(new Predicate[0]));
+		if (!criteria.getIncludeRetired()) {
+			combined = cb.and(combined, cb.isFalse(root.get("retired")));
+		}
+		cq.where(combined);
+
+		return session.createQuery(cq).getResultList().stream().distinct().collect(toList());
+	}
+
+	// mapping is assumed to be in the form "source:code"
+	private Optional<Predicate> buildMappingExistsPredicate(CriteriaQuery<Concept> cq, Root<Concept> root,
+	        CriteriaBuilder cb, String mapping, boolean caseSensitive) {
+		int idx = mapping.indexOf(":");
+		if (idx < 0 || idx >= mapping.length() - 1) {
+			return Optional.empty();
+		}
+		String sourceName = mapping.substring(0, idx).trim();
+		String code = mapping.substring(idx + 1).trim();
+		if (sourceName.isEmpty() || code.isEmpty()) {
+			return Optional.empty();
+		}
+
+		Subquery<ConceptMap> sub = cq.subquery(ConceptMap.class);
+		Root<ConceptMap> mapRoot = sub.from(ConceptMap.class);
+		Join<ConceptMap, ConceptReferenceTerm> termJoin = mapRoot.join(CONCEPT_REFERENCE_TERM);
+		Join<ConceptReferenceTerm, ConceptSource> sourceJoin = termJoin.join(CONCEPT_SOURCE);
+
+		List<Predicate> predicates = new ArrayList<>();
+		predicates.add(cb.equal(mapRoot.get("concept"), root));
+		if (caseSensitive) {
+			predicates.add(cb.equal(cb.lower(termJoin.get("code")), code.toLowerCase()));
+			predicates.add(cb.or(cb.equal(cb.lower(sourceJoin.get("name")), sourceName.toLowerCase()),
+			    cb.equal(cb.lower(sourceJoin.get(HL7_CODE)), sourceName.toLowerCase())));
+		} else {
+			predicates.add(cb.equal(termJoin.get("code"), code));
+			predicates.add(
+			    cb.or(cb.equal(sourceJoin.get("name"), sourceName), cb.equal(sourceJoin.get(HL7_CODE), sourceName)));
+		}
+		sub.select(mapRoot).where(predicates.toArray(new Predicate[0]));
+		return Optional.of(cb.exists(sub));
+	}
+
+	private Predicate buildNameExistsPredicate(CriteriaQuery<Concept> cq, Root<Concept> root, CriteriaBuilder cb,
+	        String name, boolean caseSensitive, Locale locale, Locale language) {
+		Subquery<ConceptName> sub = cq.subquery(ConceptName.class);
+		Root<ConceptName> nameRoot = sub.from(ConceptName.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+		predicates.add(cb.equal(nameRoot.get("concept"), root));
+		predicates.add(cb.or(cb.equal(nameRoot.get("locale"), locale),
+		    cb.like(nameRoot.get("locale").as(String.class), language.toString())));
+		if (caseSensitive) {
+			predicates.add(cb.like(cb.lower(nameRoot.get("name")), name.toLowerCase()));
+		} else {
+			predicates.add(cb.equal(nameRoot.get("name"), name));
+		}
+		predicates.add(cb.isFalse(nameRoot.get("voided")));
+		sub.select(nameRoot).where(predicates.toArray(new Predicate[0]));
+		return cb.exists(sub);
+	}
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptClassByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptClass getConceptClassByUuid(String uuid) {
-		return (ConceptClass) sessionFactory.getCurrentSession().createQuery("from ConceptClass cc where cc.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptClass.class, uuid);
 	}
-	
+
 	@Override
 	public ConceptAnswer getConceptAnswerByUuid(String uuid) {
-		return (ConceptAnswer) sessionFactory.getCurrentSession().createQuery("from ConceptAnswer cc where cc.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptAnswer.class, uuid);
 	}
-	
+
 	@Override
 	public ConceptName getConceptNameByUuid(String uuid) {
-		return (ConceptName) sessionFactory.getCurrentSession().createQuery("from ConceptName cc where cc.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptName.class, uuid);
 	}
-	
+
 	@Override
 	public ConceptSet getConceptSetByUuid(String uuid) {
-		return (ConceptSet) sessionFactory.getCurrentSession().createQuery("from ConceptSet cc where cc.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptSet.class, uuid);
 	}
-	
+
 	@Override
 	public ConceptSource getConceptSourceByUuid(String uuid) {
-		return (ConceptSource) sessionFactory.getCurrentSession().createQuery("from ConceptSource cc where cc.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptSource.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptDatatypeByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptDatatype getConceptDatatypeByUuid(String uuid) {
-		return (ConceptDatatype) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptDatatype cd where cd.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptDatatype.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptNumericByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptNumeric getConceptNumericByUuid(String uuid) {
-		return (ConceptNumeric) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptNumeric cn where cn.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptNumeric.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptProposalByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptProposal getConceptProposalByUuid(String uuid) {
-		return (ConceptProposal) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptProposal cp where cp.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptProposal.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrugByUuid(java.lang.String)
 	 */
 	@Override
 	public Drug getDrugByUuid(String uuid) {
-		return (Drug) sessionFactory.getCurrentSession().createQuery("from Drug d where d.uuid = :uuid").setString("uuid",
-		    uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, Drug.class, uuid);
 	}
-	
+
 	@Override
 	public DrugIngredient getDrugIngredientByUuid(String uuid) {
-		return (DrugIngredient) sessionFactory.getCurrentSession().createQuery("from DrugIngredient d where d.uuid = :uuid")
-		        .setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, DrugIngredient.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptUuids()
 	 */
 	@Override
+	@SuppressWarnings("unchecked")
 	public Map<Integer, String> getConceptUuids() {
 		Map<Integer, String> ret = new HashMap<>();
 		Query q = sessionFactory.getCurrentSession().createQuery("select conceptId, uuid from Concept");
-		List<Object[]> list = q.list();
+		List<Object[]> list = q.getResultList();
 		for (Object[] o : list) {
 			ret.put((Integer) o[0], (String) o[1]);
 		}
 		return ret;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptDescriptionByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptDescription getConceptDescriptionByUuid(String uuid) {
-		return (ConceptDescription) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptDescription cd where cd.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptDescription.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptNameTagByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptNameTag getConceptNameTagByUuid(String uuid) {
-		return (ConceptNameTag) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptNameTag cnt where cnt.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptNameTag.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptMapsBySource(ConceptSource)
 	 */
 	@Override
-	@SuppressWarnings("unchecked")
 	public List<ConceptMap> getConceptMapsBySource(ConceptSource conceptSource) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMap.class);
-		criteria.createAlias("conceptReferenceTerm", "term");
-		criteria.add(Restrictions.eq("term.conceptSource", conceptSource));
-		return (List<ConceptMap>) criteria.list();
+		if (conceptSource == null) {
+			return Collections.emptyList();
+		}
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptMap> cq = cb.createQuery(ConceptMap.class);
+
+		Root<ConceptMap> root = cq.from(ConceptMap.class);
+		Join<ConceptMap, ConceptReferenceTerm> conceptReferenceTermJoin = root.join(CONCEPT_REFERENCE_TERM);
+
+		cq.where(cb.equal(conceptReferenceTermJoin.get(CONCEPT_SOURCE), conceptSource));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptSourceByName(java.lang.String)
 	 */
 	@Override
 	public ConceptSource getConceptSourceByName(String conceptSourceName) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptSource.class, "source");
-		criteria.add(Restrictions.eq("source.name", conceptSourceName));
-		return (ConceptSource) criteria.uniqueResult();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSource> cq = cb.createQuery(ConceptSource.class);
+		Root<ConceptSource> root = cq.from(ConceptSource.class);
+
+		cq.where(cb.equal(root.get("name"), conceptSourceName));
+
+		return session.createQuery(cq).uniqueResult();
 	}
 
 	/**
@@ -1187,11 +1395,17 @@ public class HibernateConceptDAO implements ConceptDAO {
 		if (StringUtils.isBlank(uniqueId)) {
 			return null;
 		}
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptSource.class);
-		criteria.add(Restrictions.eq("uniqueId", uniqueId));
-		return (ConceptSource) criteria.uniqueResult();
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSource> cq = cb.createQuery(ConceptSource.class);
+		Root<ConceptSource> root = cq.from(ConceptSource.class);
+
+		cq.where(cb.equal(root.get("uniqueId"), uniqueId));
+
+		return session.createQuery(cq).uniqueResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptSourceByHL7Code(java.lang.String)
 	 */
@@ -1200,24 +1414,31 @@ public class HibernateConceptDAO implements ConceptDAO {
 		if (StringUtils.isBlank(hl7Code)) {
 			return null;
 		}
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptSource.class);
-		criteria.add(Restrictions.eq("hl7Code", hl7Code));
-		return (ConceptSource) criteria.uniqueResult();
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptSource> cq = cb.createQuery(ConceptSource.class);
+		Root<ConceptSource> root = cq.from(ConceptSource.class);
+
+		cq.where(cb.equal(root.get(HL7_CODE), hl7Code));
+
+		return session.createQuery(cq).uniqueResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getSavedConceptDatatype(org.openmrs.Concept)
 	 */
 	@Override
 	public ConceptDatatype getSavedConceptDatatype(Concept concept) {
-		SQLQuery sql = sessionFactory.getCurrentSession().createSQLQuery(
-		    "select datatype.* from " + "concept_datatype datatype, " + "concept concept " + "where "
-		            + "datatype.concept_datatype_id = concept.datatype_id " + "and concept.concept_id=:conceptId")
-		        .addEntity(ConceptDatatype.class);
-		sql.setInteger("conceptId", concept.getConceptId());
-		return (ConceptDatatype) sql.uniqueResult();
+		Query sql = sessionFactory.getCurrentSession().createNativeQuery(
+		    "select datatype.* from concept_datatype datatype, concept concept where "
+		            + "datatype.concept_datatype_id = concept.datatype_id and concept.concept_id=:conceptId",
+		    ConceptDatatype.class);
+		sql.setParameter("conceptId", concept.getConceptId());
+
+		return JpaUtils.getSingleResultOrNull(sql);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getSavedConceptName(org.openmrs.ConceptName)
 	 */
@@ -1226,42 +1447,50 @@ public class HibernateConceptDAO implements ConceptDAO {
 		sessionFactory.getCurrentSession().refresh(conceptName);
 		return conceptName;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptStopWords(java.util.Locale)
 	 */
 	@Override
 	public List<String> getConceptStopWords(Locale locale) throws DAOException {
-		
+
 		locale = (locale == null ? Context.getLocale() : locale);
-		
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptStopWord.class);
-		criteria.setProjection(Projections.property("value"));
-		criteria.add(Restrictions.eq("locale", locale));
-		
-		return (List<String>) criteria.list();
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<String> cq = cb.createQuery(String.class);
+		Root<ConceptStopWord> root = cq.from(ConceptStopWord.class);
+
+		cq.select(root.get("value"));
+		cq.where(cb.equal(root.get("locale"), locale));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptStopWord(org.openmrs.ConceptStopWord)
 	 */
 	@Override
 	public ConceptStopWord saveConceptStopWord(ConceptStopWord conceptStopWord) throws DAOException {
 		if (conceptStopWord != null) {
-			Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptStopWord.class);
-			criteria.add(Restrictions.eq("value", conceptStopWord.getValue()));
-			criteria.add(Restrictions.eq("locale", conceptStopWord.getLocale()));
-			List<ConceptStopWord> stopWordList = criteria.list();
-			
+			Session session = sessionFactory.getCurrentSession();
+			CriteriaBuilder cb = session.getCriteriaBuilder();
+			CriteriaQuery<ConceptStopWord> cq = cb.createQuery(ConceptStopWord.class);
+			Root<ConceptStopWord> root = cq.from(ConceptStopWord.class);
+
+			cq.where(cb.and(cb.equal(root.get("value"), conceptStopWord.getValue()),
+			    cb.equal(root.get("locale"), conceptStopWord.getLocale())));
+
+			List<ConceptStopWord> stopWordList = session.createQuery(cq).getResultList();
+
 			if (!stopWordList.isEmpty()) {
 				throw new DAOException("Duplicate ConceptStopWord Entry");
 			}
-			sessionFactory.getCurrentSession().saveOrUpdate(conceptStopWord);
+			conceptStopWord = HibernateUtil.saveOrUpdate(session, conceptStopWord);
 		}
-		
 		return conceptStopWord;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#deleteConceptStopWord(java.lang.Integer)
 	 */
@@ -1270,101 +1499,128 @@ public class HibernateConceptDAO implements ConceptDAO {
 		if (conceptStopWordId == null) {
 			throw new DAOException("conceptStopWordId is null");
 		}
-		Object csw = sessionFactory.getCurrentSession().createCriteria(ConceptStopWord.class).add(
-		    Restrictions.eq("conceptStopWordId", conceptStopWordId)).uniqueResult();
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptStopWord> cq = cb.createQuery(ConceptStopWord.class);
+		Root<ConceptStopWord> root = cq.from(ConceptStopWord.class);
+
+		cq.where(cb.equal(root.get("conceptStopWordId"), conceptStopWordId));
+
+		ConceptStopWord csw = session.createQuery(cq).uniqueResult();
 		if (csw == null) {
 			throw new DAOException("Concept Stop Word not found or already deleted");
 		}
-		sessionFactory.getCurrentSession().delete(csw);
+		session.remove(csw);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getAllConceptStopWords()
 	 */
 	@Override
 	public List<ConceptStopWord> getAllConceptStopWords() {
-		return sessionFactory.getCurrentSession().createCriteria(ConceptStopWord.class).list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptStopWord> cq = cb.createQuery(ConceptStopWord.class);
+		cq.from(ConceptStopWord.class);
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see ConceptService#getCountOfDrugs(String, Concept, boolean, boolean, boolean)
 	 */
 	@Override
 	public Long getCountOfDrugs(String drugName, Concept concept, boolean searchKeywords, boolean searchDrugConceptNames,
 	        boolean includeRetired) throws DAOException {
-		LuceneQuery<Drug> drugsQuery = newDrugQuery(drugName, searchKeywords, searchDrugConceptNames, Context.getLocale(),
+		SearchQuery<Drug> drugsQuery = newDrugQuery(drugName, searchKeywords, searchDrugConceptNames, Context.getLocale(),
 		    false, concept, includeRetired);
-		
+
 		if (drugsQuery == null) {
 			return 0L;
 		}
-		
-		return drugsQuery.resultSize();
+
+		return drugsQuery.fetchTotalHitCount();
 	}
-	
+
 	/**
-	 * <strong>Should</strong> return a drug if either the drug name or concept name matches the phase not both
-	 * <strong>Should</strong> return distinct drugs
-	 * <strong>Should</strong> return a drug, if phrase match concept_name No need to match both concept_name and
-	 *         drug_name
-	 * <strong>Should</strong> return drug when phrase match drug_name even searchDrugConceptNames is false
-	 * <strong>Should</strong> return a drug if phrase match drug_name No need to match both concept_name and
-	 *         drug_name
+	 * drug_name drug_name
+	 * <p>
+	 * <strong>Should</strong> return a drug if either the drug name or concept name matches the phase
+	 * not both<br/>
+	 * <strong>Should</strong> return distinct drugs<br/>
+	 * <strong>Should</strong> return a drug, if phrase match concept_name No need to match both
+	 * concept_name and<br/>
+	 * <strong>Should</strong> return drug when phrase match drug_name even searchDrugConceptNames is
+	 * false<br/>
+	 * <strong>Should</strong> return a drug if phrase match drug_name No need to match both
+	 * concept_name and
 	 */
 	@Override
 	public List<Drug> getDrugs(String drugName, Concept concept, boolean searchKeywords, boolean searchDrugConceptNames,
 	        boolean includeRetired, Integer start, Integer length) throws DAOException {
-		LuceneQuery<Drug> drugsQuery = newDrugQuery(drugName, searchKeywords, searchDrugConceptNames, Context.getLocale(),
+		SearchQuery<Drug> drugsQuery = newDrugQuery(drugName, searchKeywords, searchDrugConceptNames, Context.getLocale(),
 		    false, concept, includeRetired);
-		
+
 		if (drugsQuery == null) {
 			return Collections.emptyList();
 		}
-		
-		return drugsQuery.listPart(start, length).getList();
+
+		return drugsQuery.fetchHits(start, length);
 	}
-	
-	private LuceneQuery<Drug> newDrugQuery(String drugName, boolean searchKeywords, boolean searchDrugConceptNames,
+
+	private SearchQuery<Drug> newDrugQuery(String drugName, boolean searchKeywords, boolean searchDrugConceptNames,
 	        Locale locale, boolean exactLocale, Concept concept, boolean includeRetired) {
 		if (StringUtils.isBlank(drugName) && concept == null) {
 			return null;
 		}
-		if (locale == null) {
-			locale = Context.getLocale();
+		final Collection<Locale> locales = Collections.singletonList(locale == null ? Context.getLocale() : locale);
+
+		final List<Object> conceptIds;
+		if (searchDrugConceptNames) {
+			SearchSession searchSession = searchSessionFactory.getSearchSession();
+			SearchScope<ConceptName> scope = searchSession.scope(ConceptName.class);
+
+			SearchPredicate conceptNamePredicate = newConceptNamePredicate(scope.predicate(), drugName, searchKeywords,
+			    locales, exactLocale, includeRetired, null, null, null, null, null);
+
+			conceptIds = SearchQueryUnique.findUniqueKeys(searchSession, scope, conceptNamePredicate, "concept.conceptId");
+		} else {
+			conceptIds = Collections.emptyList();
 		}
-		
-		StringBuilder query = new StringBuilder();
-		if (!StringUtils.isBlank(drugName)) {
-			String escapedName = LuceneQuery.escapeQuery(drugName);
-			List<String> tokenizedName = Arrays.asList(escapedName.trim().split("\\+"));
-			query.append("(");
-			query.append(newNameQuery(tokenizedName, escapedName, searchKeywords));
-			query.append(")^0.3 OR drugReferenceMaps.conceptReferenceTerm.code:(\"").append(escapedName).append("\")^0.6");
-		}
-		
-		if (concept != null) {
-			query.append(" OR concept.conceptId:(").append(concept.getConceptId()).append(")^0.1");
-		} else if (searchDrugConceptNames) {
-			LuceneQuery<ConceptName> conceptNameQuery = newConceptNameLuceneQuery(drugName, searchKeywords,
-					Collections.singletonList(locale), exactLocale, includeRetired, null, null, null, null, null);
-			List<Object[]> conceptIds = conceptNameQuery.listProjection("concept.conceptId");
-			if (!conceptIds.isEmpty()) {
-				CollectionUtils.transform(conceptIds, input -> ((Object[]) input)[0].toString());
-				//The default Lucene clauses limit is 1024. We arbitrarily chose to use 512 here as it does not make sense to return more hits by concept name anyway.
-				int maxSize = (conceptIds.size() < 512) ? conceptIds.size() : 512;
-				query.append(" OR concept.conceptId:(").append(StringUtils.join(conceptIds.subList(0, maxSize), " OR "))
-				        .append(")^0.1");
+
+		return searchSessionFactory.getSearchSession().search(Drug.class).where(f -> f.bool().with(b -> {
+			b.minimumShouldMatchNumber(1);
+			List<String> tokenizedName = tokenizeName(drugName, locales);
+			BooleanPredicateClausesStep<?, ?> nameQuery = newNameQuery(f, tokenizedName, drugName, searchKeywords);
+			b.should(f.match().field("drugReferenceMaps.conceptReferenceTerm.code").matching(drugName).boost(10f));
+			b.should(nameQuery.boost(0.5f));
+			if (concept != null) {
+				b.should(f.match().field("concept.conceptId").matching(concept.getId()).boost(0.1f));
 			}
-		}
-		
-		LuceneQuery<Drug> drugsQuery = LuceneQuery
-		        .newQuery(Drug.class, sessionFactory.getCurrentSession(), query.toString());
-		if (!includeRetired) {
-			drugsQuery.include("retired", false);
-		}
-		return drugsQuery;
+			if (!conceptIds.isEmpty()) {
+				float boost = 0.1f;
+				int boostItems = 10; // boost first items in order
+				int i = 0;
+				for (Object conceptId : conceptIds) {
+					b.should(f.match().field("concept.conceptId").matching(conceptId).boost(boost));
+					boost = boost * 0.9f;
+					i++;
+					if (boostItems == i) {
+						break;
+					}
+				}
+				if (conceptIds.size() > boostItems) {
+					b.should(f.terms().field("concept.conceptId")
+					        .matchingAny(conceptIds.subList(boostItems, conceptIds.size())).boost(boost));
+				}
+			}
+			if (!includeRetired) {
+				b.filter(f.match().field("retired").matching(Boolean.FALSE));
+			}
+		})).toQuery();
 	}
-	
+
 	/**
 	 * @see ConceptDAO#getConcepts(String, List, boolean, List, List, List, List, Concept, Integer,
 	 *      Integer)
@@ -1374,400 +1630,473 @@ public class HibernateConceptDAO implements ConceptDAO {
 	        final boolean includeRetired, final List<ConceptClass> requireClasses, final List<ConceptClass> excludeClasses,
 	        final List<ConceptDatatype> requireDatatypes, final List<ConceptDatatype> excludeDatatypes,
 	        final Concept answersToConcept, final Integer start, final Integer size) throws DAOException {
-		
-		LuceneQuery<ConceptName> query = newConceptNameLuceneQuery(phrase, true, locales, false, includeRetired,
-		    requireClasses, excludeClasses, requireDatatypes, excludeDatatypes, answersToConcept);
-		
-		ListPart<ConceptName> names = query.listPart(start, size);
-		
-		List<ConceptSearchResult> results = new ArrayList<>();
-		
-		for (ConceptName name : names.getList()) {
-			results.add(new ConceptSearchResult(phrase, name.getConcept(), name));
-		}
-		
-		return results;
+
+		return SearchQueryUnique.search(searchSessionFactory,
+		    SearchQueryUnique.newQuery(ConceptName.class,
+		        f -> newConceptNamePredicate(f, phrase, true, locales, false, includeRetired, requireClasses, excludeClasses,
+		            requireDatatypes, excludeDatatypes, answersToConcept),
+		        "concept.conceptId", n -> new ConceptSearchResult(phrase, n.getConcept(), n)),
+		    start, size);
 	}
-	
+
 	@Override
 	public Integer getCountOfConcepts(final String phrase, List<Locale> locales, boolean includeRetired,
 	        List<ConceptClass> requireClasses, List<ConceptClass> excludeClasses, List<ConceptDatatype> requireDatatypes,
 	        List<ConceptDatatype> excludeDatatypes, Concept answersToConcept) throws DAOException {
-		
-		LuceneQuery<ConceptName> query = newConceptNameLuceneQuery(phrase, true, locales, false, includeRetired,
-		    requireClasses, excludeClasses, requireDatatypes, excludeDatatypes, answersToConcept);
-		
-		Long size = query.resultSize();
-		return size.intValue();
+
+		return Math.toIntExact(SearchQueryUnique.searchCount(searchSessionFactory,
+		    SearchQueryUnique.newQuery(
+		        ConceptName.class, f -> newConceptNamePredicate(f, phrase, true, locales, false, includeRetired,
+		            requireClasses, excludeClasses, requireDatatypes, excludeDatatypes, answersToConcept),
+		        "concept.conceptId")));
 	}
-	
-	private LuceneQuery<ConceptName> newConceptNameLuceneQuery(final String phrase, boolean searchKeywords,
-	        List<Locale> locales, boolean searchExactLocale, boolean includeRetired, List<ConceptClass> requireClasses,
+
+	private SearchPredicate newConceptNamePredicate(SearchPredicateFactory f, final String phrase, boolean searchKeywords,
+	        Collection<Locale> locales, boolean searchExactLocale, boolean includeRetired, List<ConceptClass> requireClasses,
 	        List<ConceptClass> excludeClasses, List<ConceptDatatype> requireDatatypes,
 	        List<ConceptDatatype> excludeDatatypes, Concept answersToConcept) {
-		final StringBuilder query = new StringBuilder();
-		
-		if (!StringUtils.isBlank(phrase)) {
-			final Set<Locale> searchLocales;
-			
-			if (locales == null) {
-				searchLocales = new HashSet<>(Collections.singletonList(Context.getLocale()));
-			} else {
-				searchLocales = new HashSet<>(locales);
-			}
-			
-			query.append(newConceptNameQuery(phrase, searchKeywords, searchLocales, searchExactLocale));
-		}
-		
-		LuceneQuery<ConceptName> luceneQuery = LuceneQuery.newQuery(ConceptName.class, sessionFactory.getCurrentSession(),
-		    query.toString()).include("concept.conceptClass.conceptClassId", transformToIds(requireClasses)).exclude(
-		    "concept.conceptClass.conceptClassId", transformToIds(excludeClasses)).include(
-		    "concept.datatype.conceptDatatypeId", transformToIds(requireDatatypes)).exclude(
-		    "concept.datatype.conceptDatatypeId", transformToIds(excludeDatatypes));
-		
-		if (answersToConcept != null) {
-			Collection<ConceptAnswer> answers = answersToConcept.getAnswers(false);
-			
-			if (answers != null && !answers.isEmpty()) {
-				List<Integer> ids = new ArrayList<>();
-				for (ConceptAnswer conceptAnswer : answersToConcept.getAnswers(false)) {
-					ids.add(conceptAnswer.getAnswerConcept().getId());
+		return f.bool().with(b -> {
+			if (!StringUtils.isBlank(phrase)) {
+				final Collection<Locale> searchLocales;
+
+				if (locales == null) {
+					searchLocales = Collections.singletonList(Context.getLocale());
+				} else {
+					searchLocales = new HashSet<>(locales);
 				}
-				luceneQuery.include("concept.conceptId", ids.toArray(new Object[0]));
+
+				b.must(newConceptNameQuery(f, phrase, searchKeywords, searchLocales, searchExactLocale));
 			}
-		}
-		
-		if (!includeRetired) {
-			luceneQuery.include("concept.retired", false);
-		}
-		
-		luceneQuery.skipSame("concept.conceptId");
-		
-		return luceneQuery;
+
+			if (!CollectionUtils.isEmpty(requireClasses)) {
+				b.filter(f.terms().field("concept.conceptClass").matchingAny(requireClasses));
+			}
+			if (!CollectionUtils.isEmpty(excludeClasses)) {
+				b.filter(f.not(f.terms().field("concept.conceptClass").matchingAny(excludeClasses)));
+			}
+			if (!CollectionUtils.isEmpty(requireDatatypes)) {
+				b.filter(f.terms().field("concept.datatype").matchingAny(requireDatatypes));
+			}
+			if (!CollectionUtils.isEmpty(excludeDatatypes)) {
+				b.filter(f.not(f.terms().field("concept.datatype").matchingAny(excludeDatatypes)));
+			}
+
+			if (answersToConcept != null) {
+				Collection<ConceptAnswer> answers = answersToConcept.getAnswers(false);
+
+				if (answers != null && !answers.isEmpty()) {
+					List<Integer> ids = new ArrayList<>();
+					for (ConceptAnswer conceptAnswer : answersToConcept.getAnswers(false)) {
+						ids.add(conceptAnswer.getAnswerConcept().getId());
+					}
+					b.filter(f.terms().field("concept.conceptId").matchingAny(ids));
+				}
+			}
+
+			if (!includeRetired) {
+				b.filter(f.match().field("concept.retired").matching(Boolean.FALSE));
+			}
+		}).toPredicate();
 	}
-	
-	private String[] transformToIds(final List<? extends OpenmrsObject> items) {
-		if (items == null || items.isEmpty()) {
-			return new String[0];
-		}
-		
-		String[] ids = new String[items.size()];
-		for (int i = 0; i < items.size(); i++) {
-			ids[i] = items.get(i).getId().toString();
-		}
-		return ids;
-	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptMapTypes(boolean, boolean)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptMapType> getConceptMapTypes(boolean includeRetired, boolean includeHidden) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMapType.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptMapType> cq = cb.createQuery(ConceptMapType.class);
+		Root<ConceptMapType> root = cq.from(ConceptMapType.class);
+
+		List<Predicate> predicates = new ArrayList<>();
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			predicates.add(cb.isFalse(root.get("retired")));
 		}
 		if (!includeHidden) {
-			criteria.add(Restrictions.eq("isHidden", false));
+			predicates.add(cb.isFalse(root.get("isHidden")));
 		}
-		
-		List<ConceptMapType> conceptMapTypes = criteria.list();
+
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		List<ConceptMapType> conceptMapTypes = session.createQuery(cq).getResultList();
 		conceptMapTypes.sort(new ConceptMapTypeComparator());
-		
+
 		return conceptMapTypes;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptMapType(java.lang.Integer)
 	 */
 	@Override
 	public ConceptMapType getConceptMapType(Integer conceptMapTypeId) throws DAOException {
-		return (ConceptMapType) sessionFactory.getCurrentSession().get(ConceptMapType.class, conceptMapTypeId);
+		return sessionFactory.getCurrentSession().get(ConceptMapType.class, conceptMapTypeId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptMapTypeByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptMapType getConceptMapTypeByUuid(String uuid) throws DAOException {
-		return (ConceptMapType) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptMapType cmt where cmt.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptMapType.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptMapTypeByName(java.lang.String)
 	 */
 	@Override
 	public ConceptMapType getConceptMapTypeByName(String name) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMapType.class);
-		criteria.add(Restrictions.ilike("name", name, MatchMode.EXACT));
-		return (ConceptMapType) criteria.uniqueResult();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptMapType> cq = cb.createQuery(ConceptMapType.class);
+		Root<ConceptMapType> root = cq.from(ConceptMapType.class);
+
+		cq.where(cb.like(cb.lower(root.get("name")), MatchMode.EXACT.toLowerCasePattern(name)));
+
+		return session.createQuery(cq).uniqueResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptMapType(org.openmrs.ConceptMapType)
 	 */
 	@Override
 	public ConceptMapType saveConceptMapType(ConceptMapType conceptMapType) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(conceptMapType);
-		return conceptMapType;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), conceptMapType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#deleteConceptMapType(org.openmrs.ConceptMapType)
 	 */
 	@Override
 	public void deleteConceptMapType(ConceptMapType conceptMapType) throws DAOException {
-		sessionFactory.getCurrentSession().delete(conceptMapType);
+		sessionFactory.getCurrentSession().remove(conceptMapType);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTerms(boolean)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptReferenceTerm> getConceptReferenceTerms(boolean includeRetired) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTerm.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTerm> cq = cb.createQuery(ConceptReferenceTerm.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
 		if (!includeRetired) {
-			criteria.add(Restrictions.eq("retired", false));
+			cq.where(cb.isFalse(root.get("retired")));
 		}
-		return criteria.list();
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTerm(java.lang.Integer)
 	 */
 	@Override
 	public ConceptReferenceTerm getConceptReferenceTerm(Integer conceptReferenceTermId) throws DAOException {
-		return (ConceptReferenceTerm) sessionFactory.getCurrentSession().get(ConceptReferenceTerm.class,
-		    conceptReferenceTermId);
+		return sessionFactory.getCurrentSession().get(ConceptReferenceTerm.class, conceptReferenceTermId);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTermByUuid(java.lang.String)
 	 */
 	@Override
 	public ConceptReferenceTerm getConceptReferenceTermByUuid(String uuid) throws DAOException {
-		return (ConceptReferenceTerm) sessionFactory.getCurrentSession().createQuery(
-		    "from ConceptReferenceTerm crt where crt.uuid = :uuid").setString("uuid", uuid).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptReferenceTerm.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTermsBySource(ConceptSource)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptReferenceTerm> getConceptReferenceTermsBySource(ConceptSource conceptSource) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTerm.class);
-		criteria.add(Restrictions.eq("conceptSource", conceptSource));
-		return (List<ConceptReferenceTerm>) criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTerm> cq = cb.createQuery(ConceptReferenceTerm.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
+		cq.where(cb.equal(root.get(CONCEPT_SOURCE), conceptSource));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTermByName(java.lang.String,
 	 *      org.openmrs.ConceptSource)
 	 */
-	@SuppressWarnings("rawtypes")
 	@Override
 	public ConceptReferenceTerm getConceptReferenceTermByName(String name, ConceptSource conceptSource) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTerm.class);
-		criteria.add(Restrictions.ilike("name", name, MatchMode.EXACT));
-		criteria.add(Restrictions.eq("conceptSource", conceptSource));
-		List terms = criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTerm> cq = cb.createQuery(ConceptReferenceTerm.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
+		Predicate namePredicate = cb.like(cb.lower(root.get("name")), MatchMode.EXACT.toLowerCasePattern(name));
+		Predicate sourcePredicate = cb.equal(root.get(CONCEPT_SOURCE), conceptSource);
+
+		cq.where(cb.and(namePredicate, sourcePredicate));
+
+		List<ConceptReferenceTerm> terms = session.createQuery(cq).getResultList();
 		if (terms.isEmpty()) {
 			return null;
 		} else if (terms.size() > 1) {
-			throw new APIException("ConceptReferenceTerm.foundMultipleTermsWithNameInSource", new Object[] { name,
-			        conceptSource.getName() });
+			throw new APIException("ConceptReferenceTerm.foundMultipleTermsWithNameInSource",
+			        new Object[] { name, conceptSource.getName() });
 		}
-		return (ConceptReferenceTerm) terms.get(0);
+		return terms.get(0);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTermByCode(java.lang.String,
 	 *      org.openmrs.ConceptSource)
 	 */
-	@SuppressWarnings("rawtypes")
 	@Override
 	public ConceptReferenceTerm getConceptReferenceTermByCode(String code, ConceptSource conceptSource) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTerm.class);
-		criteria.add(Restrictions.eq("code", code));
-		criteria.add(Restrictions.eq("conceptSource", conceptSource));
-		List terms = criteria.list();
-		if (terms.isEmpty()) {
+		List<ConceptReferenceTerm> conceptReferenceTerms = getConceptReferenceTermByCode(code, conceptSource, true);
+
+		if (conceptReferenceTerms.isEmpty()) {
 			return null;
-		} else if (terms.size() > 1) {
-			throw new APIException("ConceptReferenceTerm.foundMultipleTermsWithCodeInSource", new Object[] { code,
-			        conceptSource.getName() });
+		} else if (conceptReferenceTerms.size() > 1) {
+			List<ConceptReferenceTerm> unretiredConceptReferenceTerms = conceptReferenceTerms.stream()
+			        .filter(term -> !term.getRetired()).collect(toList());
+			if (unretiredConceptReferenceTerms.size() == 1) {
+				return unretiredConceptReferenceTerms.get(0);
+			}
+
+			// either more than one unretired concept term or more than one retired concept term
+			throw new APIException("ConceptReferenceTerm.foundMultipleTermsWithCodeInSource",
+			        new Object[] { code, conceptSource.getName() });
 		}
-		return (ConceptReferenceTerm) terms.get(0);
+
+		return conceptReferenceTerms.get(0);
 	}
-	
+
+	/**
+	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTermByCode(java.lang.String,
+	 *      org.openmrs.ConceptSource, boolean)
+	 */
+	@Override
+	public List<ConceptReferenceTerm> getConceptReferenceTermByCode(String code, ConceptSource conceptSource,
+	        boolean includeRetired) throws DAOException {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTerm> cq = cb.createQuery(ConceptReferenceTerm.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+		predicates.add(cb.equal(root.get("code"), code));
+		predicates.add(cb.equal(root.get(CONCEPT_SOURCE), conceptSource));
+
+		if (!includeRetired) {
+			predicates.add(cb.isFalse(root.get("retired")));
+		}
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		return session.createQuery(cq).getResultList();
+	}
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#saveConceptReferenceTerm(org.openmrs.ConceptReferenceTerm)
 	 */
 	@Override
 	public ConceptReferenceTerm saveConceptReferenceTerm(ConceptReferenceTerm conceptReferenceTerm) throws DAOException {
-		sessionFactory.getCurrentSession().saveOrUpdate(conceptReferenceTerm);
-		return conceptReferenceTerm;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), conceptReferenceTerm);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#deleteConceptReferenceTerm(org.openmrs.ConceptReferenceTerm)
 	 */
 	@Override
 	public void deleteConceptReferenceTerm(ConceptReferenceTerm conceptReferenceTerm) throws DAOException {
-		sessionFactory.getCurrentSession().delete(conceptReferenceTerm);
+		sessionFactory.getCurrentSession().remove(conceptReferenceTerm);
 	}
-	
-	/**
-	 * @see org.openmrs.api.db.ConceptDAO#getCountOfConceptReferenceTerms(String, ConceptSource, boolean)
-	 */
+
 	@Override
 	public Long getCountOfConceptReferenceTerms(String query, ConceptSource conceptSource, boolean includeRetired)
 	        throws DAOException {
-		Criteria criteria = createConceptReferenceTermCriteria(query, conceptSource, includeRetired);
-		
-		criteria.setProjection(Projections.rowCount());
-		return (Long) criteria.uniqueResult();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
+		List<Predicate> predicates = createConceptReferenceTermPredicates(cb, root, query, conceptSource, includeRetired);
+
+		cq.where(predicates.toArray(new Predicate[] {})).select(cb.count(root));
+
+		return session.createQuery(cq).getSingleResult();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceTerms(String, ConceptSource, Integer,
 	 *      Integer, boolean)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptReferenceTerm> getConceptReferenceTerms(String query, ConceptSource conceptSource, Integer start,
 	        Integer length, boolean includeRetired) throws APIException {
-		Criteria criteria = createConceptReferenceTermCriteria(query, conceptSource, includeRetired);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTerm> cq = cb.createQuery(ConceptReferenceTerm.class);
+		Root<ConceptReferenceTerm> root = cq.from(ConceptReferenceTerm.class);
+
+		List<Predicate> predicates = createConceptReferenceTermPredicates(cb, root, query, conceptSource, includeRetired);
+		cq.where(predicates.toArray(new Predicate[] {}));
+
+		TypedQuery<ConceptReferenceTerm> typedQuery = session.createQuery(cq);
+
 		if (start != null) {
-			criteria.setFirstResult(start);
+			typedQuery.setFirstResult(start);
 		}
 		if (length != null && length > 0) {
-			criteria.setMaxResults(length);
+			typedQuery.setMaxResults(length);
 		}
-		
-		return criteria.list();
+
+		return typedQuery.getResultList();
 	}
-	
-	/**
-	 * @param query
-	 * @param includeRetired
-	 * @return
-	 */
-	private Criteria createConceptReferenceTermCriteria(String query, ConceptSource conceptSource, boolean includeRetired) {
-		Criteria searchCriteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTerm.class);
+
+	private List<Predicate> createConceptReferenceTermPredicates(CriteriaBuilder cb, Root<ConceptReferenceTerm> root,
+	        String query, ConceptSource conceptSource, boolean includeRetired) {
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (conceptSource != null) {
-			searchCriteria.add(Restrictions.eq("conceptSource", conceptSource));
+			predicates.add(cb.equal(root.get(CONCEPT_SOURCE), conceptSource));
 		}
 		if (!includeRetired) {
-			searchCriteria.add(Restrictions.eq("retired", false));
+			predicates.add(cb.isFalse(root.get("retired")));
 		}
 		if (query != null) {
-			searchCriteria.add(Restrictions.or(Restrictions.ilike("name", query, MatchMode.ANYWHERE), Restrictions.ilike(
-			    "code", query, MatchMode.ANYWHERE)));
+			Predicate namePredicate = cb.like(cb.lower(root.get("name")), MatchMode.ANYWHERE.toLowerCasePattern(query));
+			Predicate codePredicate = cb.like(cb.lower(root.get("code")), MatchMode.ANYWHERE.toLowerCasePattern(query));
+
+			predicates.add(cb.or(namePredicate, codePredicate));
 		}
-		return searchCriteria;
+
+		return predicates;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getReferenceTermMappingsTo(ConceptReferenceTerm)
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptReferenceTermMap> getReferenceTermMappingsTo(ConceptReferenceTerm term) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTermMap.class);
-		criteria.add(Restrictions.eq("termB", term));
-		return criteria.list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceTermMap> cq = cb.createQuery(ConceptReferenceTermMap.class);
+		Root<ConceptReferenceTermMap> root = cq.from(ConceptReferenceTermMap.class);
+
+		cq.where(cb.equal(root.get("termB"), term));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#isConceptReferenceTermInUse(org.openmrs.ConceptReferenceTerm)
 	 */
 	@Override
 	public boolean isConceptReferenceTermInUse(ConceptReferenceTerm term) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMap.class);
-		criteria.add(Restrictions.eq("conceptReferenceTerm", term));
-		criteria.setProjection(Projections.rowCount());
-		if ((Long) criteria.uniqueResult() > 0) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+
+		// Check in ConceptMap table
+		CriteriaQuery<Long> conceptMapQuery = cb.createQuery(Long.class);
+		Root<ConceptMap> conceptMapRoot = conceptMapQuery.from(ConceptMap.class);
+		conceptMapQuery.select(cb.count(conceptMapRoot));
+		conceptMapQuery.where(cb.equal(conceptMapRoot.get(CONCEPT_REFERENCE_TERM), term));
+
+		Long conceptMapCount = session.createQuery(conceptMapQuery).uniqueResult();
+		if (conceptMapCount > 0) {
 			return true;
 		}
-		
-		criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTermMap.class);
-		criteria.add(Restrictions.eq("termB", term));
-		criteria.setProjection(Projections.rowCount());
-		return (Long) criteria.uniqueResult() > 0;
+
+		// Check in ConceptReferenceTermMap table
+		CriteriaQuery<Long> conceptReferenceTermMapQuery = cb.createQuery(Long.class);
+		Root<ConceptReferenceTermMap> conceptReferenceTermMapRoot = conceptReferenceTermMapQuery
+		        .from(ConceptReferenceTermMap.class);
+		conceptReferenceTermMapQuery.select(cb.count(conceptReferenceTermMapRoot));
+		conceptReferenceTermMapQuery.where(cb.equal(conceptReferenceTermMapRoot.get("termB"), term));
+
+		Long conceptReferenceTermMapCount = session.createQuery(conceptReferenceTermMapQuery).uniqueResult();
+		return conceptReferenceTermMapCount > 0;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#isConceptMapTypeInUse(org.openmrs.ConceptMapType)
 	 */
 	@Override
 	public boolean isConceptMapTypeInUse(ConceptMapType mapType) throws DAOException {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMap.class);
-		criteria.add(Restrictions.eq("conceptMapType", mapType));
-		criteria.setProjection(Projections.rowCount());
-		if ((Long) criteria.uniqueResult() > 0) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+
+		// Check in ConceptMap table
+		CriteriaQuery<Long> conceptQuery = cb.createQuery(Long.class);
+		Root<ConceptMap> conceptRoot = conceptQuery.from(ConceptMap.class);
+		conceptQuery.select(cb.count(conceptRoot));
+		conceptQuery.where(cb.equal(conceptRoot.get("conceptMapType"), mapType));
+
+		Long conceptCount = session.createQuery(conceptQuery).uniqueResult();
+		if (conceptCount > 0) {
 			return true;
 		}
-		
-		criteria = sessionFactory.getCurrentSession().createCriteria(ConceptReferenceTermMap.class);
-		criteria.add(Restrictions.eq("conceptMapType", mapType));
-		criteria.setProjection(Projections.rowCount());
-		return (Long) criteria.uniqueResult() > 0;
+
+		// Check in ConceptReferenceTermMap table
+		CriteriaQuery<Long> conceptReferenceTermMapQuery = cb.createQuery(Long.class);
+		Root<ConceptReferenceTermMap> conceptReferenceTermMapRoot = conceptReferenceTermMapQuery
+		        .from(ConceptReferenceTermMap.class);
+		conceptReferenceTermMapQuery.select(cb.count(conceptReferenceTermMapRoot));
+		conceptReferenceTermMapQuery.where(cb.equal(conceptReferenceTermMapRoot.get("conceptMapType"), mapType));
+
+		Long conceptReferenceTermMapCount = session.createQuery(conceptReferenceTermMapQuery).uniqueResult();
+		return conceptReferenceTermMapCount > 0;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptsByName(java.lang.String, java.util.Locale,
 	 *      java.lang.Boolean)
 	 */
 	@Override
 	public List<Concept> getConceptsByName(final String name, final Locale locale, final Boolean exactLocale) {
-		
+
 		List<Locale> locales = new ArrayList<>();
 		if (locale == null) {
 			locales.add(Context.getLocale());
 		} else {
 			locales.add(locale);
 		}
-		
-		boolean searchExactLocale = (exactLocale == null) ? false : exactLocale;
-		
-		LuceneQuery<ConceptName> conceptNameQuery = newConceptNameLuceneQuery(name, true, locales, searchExactLocale, false,
-		    null, null, null, null, null);
-		
-		List<ConceptName> names = conceptNameQuery.list();
 
-		return new ArrayList<>(transformNamesToConcepts(names));
+		boolean searchExactLocale = (exactLocale == null) ? false : exactLocale;
+
+		return SearchQueryUnique.search(searchSessionFactory,
+		    SearchQueryUnique.newQuery(ConceptName.class,
+		        f -> newConceptNamePredicate(f, name, true, locales, searchExactLocale, false, null, null, null, null, null),
+		        "concept.conceptId", ConceptName::getConcept));
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getConceptByName(java.lang.String)
 	 */
 	@Override
 	public Concept getConceptByName(final String name) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptName.class);
-		
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptName> cq = cb.createQuery(ConceptName.class);
+		Root<ConceptName> root = cq.from(ConceptName.class);
+		Join<ConceptName, Concept> conceptJoin = root.join("concept");
+
 		Locale locale = Context.getLocale();
 		Locale language = new Locale(locale.getLanguage() + "%");
-		criteria.add(Restrictions.or(Restrictions.eq("locale", locale), Restrictions.like("locale", language)));
-		
+		List<Predicate> predicates = new ArrayList<>();
+
+		predicates.add(
+		    cb.or(cb.equal(root.get("locale"), locale), cb.like(root.get("locale").as(String.class), language.toString())));
 		if (Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()) {
-			criteria.add(Restrictions.ilike("name", name));
+			predicates.add(cb.like(cb.lower(root.get("name")), name.toLowerCase()));
 		} else {
-			criteria.add(Restrictions.eq("name", name));
+			predicates.add(cb.equal(root.get("name"), name));
 		}
-		
-		criteria.add(Restrictions.eq("voided", false));
-		
-		criteria.createAlias("concept", "concept");
-		criteria.add(Restrictions.eq("concept.retired", false));
-		
-		@SuppressWarnings("unchecked")
-		List<ConceptName> list = criteria.list();
+		predicates.add(cb.isFalse(root.get("voided")));
+		predicates.add(cb.isFalse(conceptJoin.get("retired")));
+
+		cq.where(predicates.toArray(new Predicate[0]));
+
+		List<ConceptName> list = session.createQuery(cq).getResultList();
 		LinkedHashSet<Concept> concepts = transformNamesToConcepts(list);
 
 		if (concepts.size() == 1) {
@@ -1776,7 +2105,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 			log.warn("No concept found for '" + name + "'");
 		} else {
 			log.warn("Multiple concepts found for '" + name + "'");
-			
+
 			for (Concept concept : concepts) {
 				for (ConceptName conceptName : concept.getNames(locale)) {
 					if (conceptName.getName().equalsIgnoreCase(name)) {
@@ -1790,10 +2119,10 @@ public class HibernateConceptDAO implements ConceptDAO {
 				}
 			}
 		}
-		
+
 		return null;
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDefaultConceptMapType()
 	 */
@@ -1803,13 +2132,13 @@ public class HibernateConceptDAO implements ConceptDAO {
 		sessionFactory.getCurrentSession().setHibernateFlushMode(FlushMode.MANUAL);
 		try {
 			//Defaults to same-as if the gp is not set.
-			String defaultConceptMapType = Context.getAdministrationService().getGlobalProperty(
-			    OpenmrsConstants.GP_DEFAULT_CONCEPT_MAP_TYPE);
+			String defaultConceptMapType = Context.getAdministrationService()
+			        .getGlobalProperty(OpenmrsConstants.GP_DEFAULT_CONCEPT_MAP_TYPE);
 			if (defaultConceptMapType == null) {
 				throw new DAOException("The default concept map type is not set. You need to set the '"
 				        + OpenmrsConstants.GP_DEFAULT_CONCEPT_MAP_TYPE + "' global property.");
 			}
-			
+
 			ConceptMapType conceptMapType = getConceptMapTypeByName(defaultConceptMapType);
 			if (conceptMapType == null) {
 				throw new DAOException("The default concept map type (name: " + defaultConceptMapType
@@ -1817,12 +2146,11 @@ public class HibernateConceptDAO implements ConceptDAO {
 				        + "' global property.");
 			}
 			return conceptMapType;
-		}
-		finally {
+		} finally {
 			sessionFactory.getCurrentSession().setHibernateFlushMode(previousFlushMode);
 		}
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#isConceptNameDuplicate(org.openmrs.ConceptName)
 	 */
@@ -1843,20 +2171,28 @@ public class HibernateConceptDAO implements ConceptDAO {
 				return false;
 			}
 		}
-		
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptName.class);
-		
-		criteria.add(Restrictions.eq("voided", false));
-		criteria.add(Restrictions.or(Restrictions.eq("locale", name.getLocale()), Restrictions.eq("locale", new Locale(name
-		        .getLocale().getLanguage()))));
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptName> cq = cb.createQuery(ConceptName.class);
+		Root<ConceptName> root = cq.from(ConceptName.class);
+
+		List<Predicate> predicates = new ArrayList<>();
+
+		predicates.add(cb.isFalse(root.get("voided")));
+		predicates.add(cb.or(cb.equal(root.get("locale"), name.getLocale()),
+		    cb.equal(root.get("locale"), new Locale(name.getLocale().getLanguage()))));
+
 		if (Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()) {
-			criteria.add(Restrictions.eq("name", name.getName()).ignoreCase());
+			predicates.add(cb.equal(cb.lower(root.get("name")), name.getName().toLowerCase()));
 		} else {
-			criteria.add(Restrictions.eq("name", name.getName()));
+			predicates.add(cb.equal(root.get("name"), name.getName()));
 		}
-		
-		List<ConceptName> candidateNames = criteria.list();
-		
+
+		cq.where(predicates.toArray(new Predicate[0]));
+
+		List<ConceptName> candidateNames = session.createQuery(cq).getResultList();
+
 		for (ConceptName candidateName : candidateNames) {
 			if (candidateName.getConcept().getRetired()) {
 				continue;
@@ -1864,66 +2200,100 @@ public class HibernateConceptDAO implements ConceptDAO {
 			if (candidateName.getConcept().equals(name.getConcept())) {
 				continue;
 			}
-			
-			//If it is a default name for a concept
+			// If it is a default name for a concept
 			if (candidateName.getConcept().getName(candidateName.getLocale()).equals(candidateName)) {
 				return true;
 			}
 		}
-		
+
 		return false;
 	}
-	
+
 	/**
 	 * @see ConceptDAO#getDrugs(String, java.util.Locale, boolean, boolean)
 	 */
 	@Override
 	public List<Drug> getDrugs(String searchPhrase, Locale locale, boolean exactLocale, boolean includeRetired) {
-		LuceneQuery<Drug> drugQuery = newDrugQuery(searchPhrase, true, true, locale, exactLocale, null, includeRetired);
-		
-		return drugQuery.list();
+		SearchQuery<Drug> drugQuery = newDrugQuery(searchPhrase, true, true, locale, exactLocale, null, includeRetired);
+
+		return drugQuery.fetchAllHits();
 	}
-	
+
 	/**
-	 * @see org.openmrs.api.db.ConceptDAO#getDrugsByMapping(String, ConceptSource, Collection,
-	 *      boolean)
+	 * @see org.openmrs.api.db.ConceptDAO#getDrugsByMapping(String, ConceptSource, Collection, boolean)
 	 */
 	@Override
 	public List<Drug> getDrugsByMapping(String code, ConceptSource conceptSource,
 	        Collection<ConceptMapType> withAnyOfTheseTypes, boolean includeRetired) throws DAOException {
-		
-		Criteria criteria = createSearchDrugByMappingCriteria(code, conceptSource, includeRetired);
-		// match with any of the supplied collection of conceptMapTypes
+
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Drug> cq = cb.createQuery(Drug.class);
+		Root<Drug> drugRoot = cq.from(Drug.class);
+
+		Join<Drug, DrugReferenceMap> drugReferenceMapJoin = drugRoot.join("drugReferenceMaps");
+		Join<DrugReferenceMap, ConceptReferenceTerm> termJoin = drugReferenceMapJoin.join(CONCEPT_REFERENCE_TERM);
+		List<Predicate> basePredicates = createSearchDrugByMappingPredicates(cb, drugRoot, drugReferenceMapJoin, termJoin,
+		    code, conceptSource, includeRetired);
+
 		if (!withAnyOfTheseTypes.isEmpty()) {
-			criteria.add(Restrictions.in("map.conceptMapType", withAnyOfTheseTypes));
+			// Create a predicate to check if the ConceptMapType is in the provided collection
+			Predicate mapTypePredicate = drugReferenceMapJoin.get("conceptMapType").in(withAnyOfTheseTypes);
+			basePredicates.add(mapTypePredicate);
 		}
-		//check whether retired on not retired drugs
-		return (List<Drug>) criteria.list();
+
+		cq.where(basePredicates.toArray(new Predicate[] {}));
+
+		return session.createQuery(cq).getResultList().stream().distinct().collect(toList());
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.ConceptDAO#getDrugs
 	 */
 	@Override
 	public Drug getDrugByMapping(String code, ConceptSource conceptSource,
 	        Collection<ConceptMapType> withAnyOfTheseTypesOrOrderOfPreference) throws DAOException {
-		Criteria criteria = createSearchDrugByMappingCriteria(code, conceptSource, true);
-		
-		// match with any of the supplied collection or order of preference of conceptMapTypes
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+
 		if (!withAnyOfTheseTypesOrOrderOfPreference.isEmpty()) {
+
 			for (ConceptMapType conceptMapType : withAnyOfTheseTypesOrOrderOfPreference) {
-				criteria.add(Restrictions.eq("map.conceptMapType", conceptMapType));
-				List<Drug> drugs = criteria.list();
+				CriteriaQuery<Drug> cq = cb.createQuery(Drug.class);
+				Root<Drug> drugRoot = cq.from(Drug.class);
+
+				Join<Drug, DrugReferenceMap> drugReferenceMapJoin = drugRoot.join("drugReferenceMaps");
+				Join<DrugReferenceMap, ConceptReferenceTerm> termJoin = drugReferenceMapJoin.join(CONCEPT_REFERENCE_TERM);
+
+				List<Predicate> basePredicates = createSearchDrugByMappingPredicates(cb, drugRoot, drugReferenceMapJoin,
+				    termJoin, code, conceptSource, true);
+
+				List<Predicate> predicates = new ArrayList<>(basePredicates);
+				predicates.add(cb.equal(drugReferenceMapJoin.get("conceptMapType"), conceptMapType));
+				cq.where(predicates.toArray(new Predicate[] {}));
+
+				TypedQuery<Drug> query = session.createQuery(cq);
+				List<Drug> drugs = query.getResultList();
 				if (drugs.size() > 1) {
 					throw new DAOException("There are multiple matches for the highest-priority ConceptMapType");
 				} else if (drugs.size() == 1) {
 					return drugs.get(0);
 				}
-				//reset for the next execution to avoid unwanted AND clauses on every found map type
-				criteria = createSearchDrugByMappingCriteria(code, conceptSource, true);
 			}
 		} else {
-			List<Drug> drugs = criteria.list();
+			CriteriaQuery<Drug> cq = cb.createQuery(Drug.class);
+			Root<Drug> drugRoot = cq.from(Drug.class);
+
+			Join<Drug, DrugReferenceMap> drugReferenceMapJoin = drugRoot.join("drugReferenceMaps");
+			Join<DrugReferenceMap, ConceptReferenceTerm> termJoin = drugReferenceMapJoin.join(CONCEPT_REFERENCE_TERM);
+
+			List<Predicate> basePredicates = createSearchDrugByMappingPredicates(cb, drugRoot, drugReferenceMapJoin,
+			    termJoin, code, conceptSource, true);
+
+			cq.where(basePredicates.toArray(new Predicate[] {}));
+
+			TypedQuery<Drug> query = session.createQuery(cq);
+			List<Drug> drugs = query.getResultList();
 			if (drugs.size() > 1) {
 				throw new DAOException("There are multiple matches for the highest-priority ConceptMapType");
 			} else if (drugs.size() == 1) {
@@ -1936,10 +2306,14 @@ public class HibernateConceptDAO implements ConceptDAO {
 	/**
 	 * @see ConceptDAO#getAllConceptAttributeTypes()
 	 */
-	@SuppressWarnings("unchecked")
 	@Override
 	public List<ConceptAttributeType> getAllConceptAttributeTypes() {
-		return sessionFactory.getCurrentSession().createCriteria(ConceptAttributeType.class).list();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptAttributeType> cq = cb.createQuery(ConceptAttributeType.class);
+		cq.from(ConceptAttributeType.class);
+
+		return session.createQuery(cq).getResultList();
 	}
 
 	/**
@@ -1947,8 +2321,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public ConceptAttributeType saveConceptAttributeType(ConceptAttributeType conceptAttributeType) {
-		sessionFactory.getCurrentSession().saveOrUpdate(conceptAttributeType);
-		return conceptAttributeType;
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), conceptAttributeType);
 	}
 
 	/**
@@ -1956,7 +2329,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public ConceptAttributeType getConceptAttributeType(Integer id) {
-		return (ConceptAttributeType) sessionFactory.getCurrentSession().get(ConceptAttributeType.class, id);
+		return sessionFactory.getCurrentSession().get(ConceptAttributeType.class, id);
 	}
 
 	/**
@@ -1964,8 +2337,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public ConceptAttributeType getConceptAttributeTypeByUuid(String uuid) {
-		return (ConceptAttributeType) sessionFactory.getCurrentSession().createCriteria(ConceptAttributeType.class).add(
-				Restrictions.eq("uuid", uuid)).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptAttributeType.class, uuid);
 	}
 
 	/**
@@ -1973,7 +2345,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public void deleteConceptAttributeType(ConceptAttributeType conceptAttributeType) {
-		sessionFactory.getCurrentSession().delete(conceptAttributeType);
+		sessionFactory.getCurrentSession().remove(conceptAttributeType);
 	}
 
 	/**
@@ -1981,13 +2353,17 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public List<ConceptAttributeType> getConceptAttributeTypes(String name) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptAttributeType.class);
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptAttributeType> cq = cb.createQuery(ConceptAttributeType.class);
+		Root<ConceptAttributeType> root = cq.from(ConceptAttributeType.class);
 
 		//match name anywhere and case insensitive
 		if (name != null) {
-			criteria.add(Restrictions.ilike("name", name, MatchMode.ANYWHERE));
+			cq.where(cb.like(cb.lower(root.get("name")), MatchMode.ANYWHERE.toLowerCasePattern(name)));
 		}
-		return criteria.list();
+
+		return session.createQuery(cq).getResultList();
 	}
 
 	/**
@@ -1995,9 +2371,14 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public ConceptAttributeType getConceptAttributeTypeByName(String exactName) {
-		return (ConceptAttributeType) sessionFactory.getCurrentSession().createCriteria(ConceptAttributeType.class).add(
-				Restrictions.eq("name", exactName)).uniqueResult();
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptAttributeType> cq = cb.createQuery(ConceptAttributeType.class);
+		Root<ConceptAttributeType> root = cq.from(ConceptAttributeType.class);
 
+		cq.where(cb.equal(root.get("name"), exactName));
+
+		return session.createQuery(cq).uniqueResult();
 	}
 
 	/**
@@ -2005,8 +2386,7 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public ConceptAttribute getConceptAttributeByUuid(String uuid) {
-		return (ConceptAttribute) sessionFactory.getCurrentSession().createCriteria(ConceptAttribute.class).add(
-				Restrictions.eq("uuid", uuid)).uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ConceptAttribute.class, uuid);
 	}
 
 	/**
@@ -2014,80 +2394,125 @@ public class HibernateConceptDAO implements ConceptDAO {
 	 */
 	@Override
 	public long getConceptAttributeCount(ConceptAttributeType conceptAttributeType) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptAttribute.class);
-		criteria.add(Restrictions.eq("attributeType", conceptAttributeType));
-		criteria.setProjection(Projections.rowCount());
-		return (Long) criteria.list().get(0);
+		if (conceptAttributeType == null) {
+			return 0;
+		}
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Long> cq = cb.createQuery(Long.class);
+		Root<ConceptAttribute> root = cq.from(ConceptAttribute.class);
 
+		cq.select(cb.count(root)).where(cb.equal(root.get("attributeType"), conceptAttributeType));
+
+		return session.createQuery(cq).getSingleResult();
 	}
 
 	@Override
 	public List<Concept> getConceptsByClass(ConceptClass conceptClass) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Concept.class);
-		return criteria.add(Restrictions.eq("conceptClass", conceptClass)).list();	
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<Concept> cq = cb.createQuery(Concept.class);
+		Root<Concept> root = cq.from(Concept.class);
+
+		cq.where(cb.equal(root.get("conceptClass"), conceptClass));
+
+		return session.createQuery(cq).getResultList();
 	}
-	
-	private Criteria createSearchDrugByMappingCriteria(String code, ConceptSource conceptSource, boolean includeRetired) {
-		Criteria searchCriteria = sessionFactory.getCurrentSession().createCriteria(Drug.class, "drug");
-		searchCriteria.setResultTransformer(DistinctRootEntityResultTransformer.INSTANCE);
-		
-		//join to the drugReferenceMap table
-		searchCriteria.createAlias("drug.drugReferenceMaps", "map");
-		if (code != null || conceptSource != null) {
-			// join to the conceptReferenceTerm table
-			searchCriteria.createAlias("map.conceptReferenceTerm", "term");
-		}
-		// match the source code to the passed code
+
+	private List<Predicate> createSearchDrugByMappingPredicates(CriteriaBuilder cb, Root<Drug> drugRoot,
+	        Join<Drug, DrugReferenceMap> drugReferenceMapJoin, Join<DrugReferenceMap, ConceptReferenceTerm> termJoin,
+	        String code, ConceptSource conceptSource, boolean includeRetired) {
+		List<Predicate> predicates = new ArrayList<>();
+
 		if (code != null) {
-			searchCriteria.add(Restrictions.eq("term.code", code));
+			predicates.add(cb.equal(termJoin.get("code"), code));
 		}
-		// match the conceptSource to the passed in concept source, null accepted
 		if (conceptSource != null) {
-			searchCriteria.add(Restrictions.eq("term.conceptSource", conceptSource));
+			predicates.add(cb.equal(termJoin.get(CONCEPT_SOURCE), conceptSource));
 		}
-		//check whether retired or not retired drugs
 		if (!includeRetired) {
-			searchCriteria.add(Restrictions.eq("drug.retired", false));
+			predicates.add(cb.isFalse(drugRoot.get("retired")));
 		}
-		return searchCriteria;
+
+		return predicates;
 	}
 
-	private Criteria createSearchConceptMapCriteria(String code, String sourceName, boolean includeRetired) {
-		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(ConceptMap.class);
+	private List<Predicate> createSearchConceptMapCriteria(CriteriaBuilder cb, Root<ConceptMap> root, String code,
+	        String sourceName, boolean includeRetired) {
+		List<Predicate> predicates = new ArrayList<>();
 
-		//join to the conceptReferenceTerm table
-		criteria.createAlias("conceptReferenceTerm", "term");
+		Join<ConceptMap, ConceptReferenceTerm> termJoin = root.join(CONCEPT_REFERENCE_TERM);
 
-		// match the source code to the passed code
+		// Match the source code to the passed code
 		if (Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()) {
-			criteria.add(Restrictions.eq("term.code", code).ignoreCase());
+			predicates.add(cb.equal(cb.lower(termJoin.get("code")), code.toLowerCase()));
 		} else {
-			criteria.add(Restrictions.eq("term.code", code));
+			predicates.add(cb.equal(termJoin.get("code"), code));
 		}
 
-		// join to concept reference source and match to the h17Code or source name
-		criteria.createAlias("term.conceptSource", "source");
-		if (Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()) {
-			criteria.add(Restrictions.or(Restrictions.eq("source.name", sourceName).ignoreCase(), Restrictions.eq(
-					"source.hl7Code", sourceName).ignoreCase()));
-		} else {
-			criteria.add(Restrictions.or(Restrictions.eq("source.name", sourceName), Restrictions.eq("source.hl7Code",
-					sourceName)));
-		}
+		// Join to concept reference source and match to the hl7Code or source name
+		Join<ConceptReferenceTerm, ConceptSource> sourceJoin = termJoin.join(CONCEPT_SOURCE);
 
-		criteria.createAlias("concept", "concept");
+		Predicate namePredicate = Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()
+		        ? cb.equal(cb.lower(sourceJoin.get("name")), sourceName.toLowerCase())
+		        : cb.equal(sourceJoin.get("name"), sourceName);
+		Predicate hl7CodePredicate = Context.getAdministrationService().isDatabaseStringComparisonCaseSensitive()
+		        ? cb.equal(cb.lower(sourceJoin.get(HL7_CODE)), sourceName.toLowerCase())
+		        : cb.equal(sourceJoin.get(HL7_CODE), sourceName);
 
+		predicates.add(cb.or(namePredicate, hl7CodePredicate));
+
+		// Join to concept and filter retired ones if necessary
+		Join<ConceptMap, Concept> conceptJoin = root.join("concept");
 		if (!includeRetired) {
-			// ignore retired concepts
-			criteria.add(Restrictions.eq("concept.retired", false));
-		} else {
-			// sort retired concepts to the end of the list
-			criteria.addOrder(Order.asc("concept.retired"));
+			predicates.add(cb.isFalse(conceptJoin.get("retired")));
 		}
+		return predicates;
+	}
 
-		// we only want distinct concepts
-		criteria.setResultTransformer(DistinctRootEntityResultTransformer.INSTANCE);
+	/**
+	 * @see org.openmrs.api.db.ConceptDAO#saveConceptReferenceRange(ConceptReferenceRange)
+	 */
+	@Override
+	public ConceptReferenceRange saveConceptReferenceRange(ConceptReferenceRange conceptReferenceRange) {
+		return HibernateUtil.saveOrUpdate(sessionFactory.getCurrentSession(), conceptReferenceRange);
+	}
 
-		return criteria;
+	/**
+	 * @see org.openmrs.api.db.ConceptDAO#getConceptReferenceRangesByConceptId(Integer)
+	 */
+	@Override
+	public List<ConceptReferenceRange> getConceptReferenceRangesByConceptId(Integer conceptId) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceRange> cq = cb.createQuery(ConceptReferenceRange.class);
+		Root<ConceptReferenceRange> root = cq.from(ConceptReferenceRange.class);
+
+		cq.where(cb.equal(root.get("conceptNumeric").get("conceptId"), conceptId));
+
+		return session.createQuery(cq).getResultList();
+	}
+
+	/**
+	 * @see ConceptDAO#getConceptReferenceRangeByUuid(String)
+	 */
+	@Override
+	public ConceptReferenceRange getConceptReferenceRangeByUuid(String uuid) {
+		Session session = sessionFactory.getCurrentSession();
+		CriteriaBuilder cb = session.getCriteriaBuilder();
+		CriteriaQuery<ConceptReferenceRange> cq = cb.createQuery(ConceptReferenceRange.class);
+		Root<ConceptReferenceRange> root = cq.from(ConceptReferenceRange.class);
+
+		cq.where(cb.equal(root.get("uuid"), uuid));
+
+		return session.createQuery(cq).uniqueResult();
+	}
+
+	/**
+	 * @see org.openmrs.api.db.ConceptDAO#purgeConceptReferenceRange(org.openmrs.ConceptReferenceRange)
+	 */
+	@Override
+	public void purgeConceptReferenceRange(ConceptReferenceRange conceptReferenceRange) {
+		sessionFactory.getCurrentSession().remove(conceptReferenceRange);
 	}
 }

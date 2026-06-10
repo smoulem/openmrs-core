@@ -9,25 +9,26 @@
  */
 package org.openmrs.api.handler;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
 import java.util.Date;
 
 import org.junit.jupiter.api.Test;
 import org.openmrs.Encounter;
 import org.openmrs.Patient;
-import org.openmrs.Person;
+import org.openmrs.PersonAddress;
 import org.openmrs.User;
 import org.openmrs.Voidable;
 import org.openmrs.api.APIException;
 import org.openmrs.api.context.Context;
 import org.openmrs.test.jupiter.BaseContextSensitiveTest;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 /**
  * Tests for the {@link RequireVoidReasonSaveHandler} class.
  */
 public class RequiredReasonVoidSaveHandlerTest extends BaseContextSensitiveTest {
-	
+
 	/**
 	 * @see RequireVoidReasonSaveHandler#handle(Voidable,User,Date,String)
 	 */
@@ -38,7 +39,7 @@ public class RequiredReasonVoidSaveHandlerTest extends BaseContextSensitiveTest 
 		p.setVoidReason(null);
 		assertThrows(APIException.class, () -> Context.getPatientService().savePatient(p));
 	}
-	
+
 	/**
 	 * @see RequireVoidReasonSaveHandler#handle(Voidable,User,Date,String)
 	 */
@@ -49,7 +50,7 @@ public class RequiredReasonVoidSaveHandlerTest extends BaseContextSensitiveTest 
 		e.setVoidReason("");
 		assertThrows(APIException.class, () -> Context.getEncounterService().saveEncounter(e));
 	}
-	
+
 	/**
 	 * @see RequireVoidReasonSaveHandler#handle(Voidable,User,Date,String)
 	 */
@@ -60,7 +61,7 @@ public class RequiredReasonVoidSaveHandlerTest extends BaseContextSensitiveTest 
 		e.setVoidReason("  ");
 		assertThrows(APIException.class, () -> Context.getEncounterService().saveEncounter(e));
 	}
-	
+
 	/**
 	 * @see RequireVoidReasonSaveHandler#handle(Voidable,User,Date,String)
 	 */
@@ -69,18 +70,17 @@ public class RequiredReasonVoidSaveHandlerTest extends BaseContextSensitiveTest 
 		Encounter e = Context.getEncounterService().getEncounter(3);
 		e.setVoided(true);
 		e.setVoidReason("Some Reason");
-		Context.getEncounterService().saveEncounter(e);
+		assertDoesNotThrow(() -> Context.getEncounterService().saveEncounter(e));
 	}
-	
+
 	/**
 	 * @see RequireVoidReasonSaveHandler#handle(Voidable,User,Date,String)
 	 */
 	@Test
 	public void handle_shouldNotThrowExceptionIfVoidReasonIsNullForUnsupportedTypes() {
-		Person p = Context.getPersonService().getPerson(1);
-		p.setVoided(true);
-		p.setVoidReason(null);
-		p.setVoidReason("voidReason");
-		Context.getPersonService().savePerson(p);
+		PersonAddress pa = Context.getPersonService().getPersonAddressByUuid("3350d0b5-821c-4e5e-ad1d-a9bce331e118");
+		pa.setVoided(true);
+		pa.setVoidReason(null);
+		assertDoesNotThrow(() -> Context.getPersonService().savePersonAddress(pa));
 	}
 }

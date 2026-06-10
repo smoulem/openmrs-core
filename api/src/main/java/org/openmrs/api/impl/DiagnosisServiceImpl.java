@@ -9,6 +9,12 @@
  */
 package org.openmrs.api.impl;
 
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 import org.openmrs.CodedOrFreeText;
 import org.openmrs.Diagnosis;
 import org.openmrs.DiagnosisAttribute;
@@ -18,19 +24,18 @@ import org.openmrs.Patient;
 import org.openmrs.Visit;
 import org.openmrs.api.APIException;
 import org.openmrs.api.DiagnosisService;
-import org.openmrs.api.OpenmrsService;
+import org.openmrs.api.RefByUuid;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.DiagnosisDAO;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Date;
-import java.util.List;
-import java.util.Set;
-import java.util.HashSet;
-
+@Service("diagnosisService")
 @Transactional
-public class DiagnosisServiceImpl extends BaseOpenmrsService implements DiagnosisService {
-	
+public class DiagnosisServiceImpl extends BaseOpenmrsService implements DiagnosisService, RefByUuid {
+
+	@Autowired
 	private DiagnosisDAO diagnosisDAO;
 
 	/**
@@ -48,7 +53,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	/**
 	 * Voids a diagnosis
 	 *
-	 * @param diagnosis  - the diagnosis to be voided
+	 * @param diagnosis - the diagnosis to be voided
 	 * @param voidReason - the reason for voiding the diagnosis
 	 * @return the diagnosis that was voided
 	 */
@@ -71,7 +76,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	/**
 	 * Gets diagnoses since date, sorted in reverse chronological order
 	 *
-	 * @param patient  the patient whose diagnosis we are to get
+	 * @param patient the patient whose diagnosis we are to get
 	 * @param fromDate the date used to filter diagnosis which happened from this date and later
 	 * @return the list of diagnoses for the given patient and starting from the given date
 	 */
@@ -91,7 +96,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#getDiagnosesByVisit(Visit, boolean, boolean) 
+	 * @see org.openmrs.api.DiagnosisService#getDiagnosesByVisit(Visit, boolean, boolean)
 	 */
 	@Override
 	@Transactional(readOnly = true)
@@ -100,10 +105,9 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	}
 
 	/**
-	 * Finds the primary diagnoses for a given encounter
-	 * The diagnosis order is identified using the integer rank value. The diagnosis rank is thus:
-	 * 1 - PRIMARY (Primary diagnosis)
-	 * 2 - SECONDARY (Secondary diagnosis)
+	 * Finds the primary diagnoses for a given encounter The diagnosis order is identified using the
+	 * integer rank value. The diagnosis rank is thus: 1 - PRIMARY (Primary diagnosis) 2 - SECONDARY
+	 * (Secondary diagnosis)
 	 *
 	 * @param encounter the encounter whose diagnoses we are to get
 	 * @return the list of diagnoses in the given encounter whose rank is 1 (Primary diagnosis)
@@ -117,7 +121,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	/**
 	 * Gets unique diagnoses since date, sorted in reverse chronological order
 	 *
-	 * @param patient  the patient whose diagnosis we are to get
+	 * @param patient the patient whose diagnosis we are to get
 	 * @param fromDate the date used to filter diagnosis which happened from this date and later
 	 * @return the list of diagnoses
 	 */
@@ -144,11 +148,12 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 
 	/**
 	 * Revive a diagnosis (pull a Lazarus)
+	 * <p>
+	 * <strong>Should</strong> unset voided bit on given diagnosis
 	 *
 	 * @param diagnosis diagnosis to unvoid
 	 * @return the unvoided diagnosis
 	 * @throws APIException
-	 * <strong>Should</strong> unset voided bit on given diagnosis
 	 */
 	@Override
 	public Diagnosis unvoidDiagnosis(Diagnosis diagnosis) {
@@ -156,14 +161,15 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	}
 
 	/**
-	 * Completely remove a diagnosis from the database. This should typically not be called
-	 * because we don't want to ever lose data. The data really <i>should</i> be voided and then it
-	 * is not seen in interface any longer (see #voidDiagnosis(Diagnosis) for that one) If other things link to
-	 * this diagnosis, an error will be thrown.
+	 * Completely remove a diagnosis from the database. This should typically not be called because we
+	 * don't want to ever lose data. The data really <i>should</i> be voided and then it is not seen in
+	 * interface any longer (see #voidDiagnosis(Diagnosis) for that one) If other things link to this
+	 * diagnosis, an error will be thrown.
+	 * <p>
+	 * <strong>Should</strong> delete the given diagnosis from th e database
 	 *
 	 * @param diagnosis diagnosis to remove from the database
 	 * @throws APIException
-	 * <strong>Should</strong> delete the given diagnosis from th e database
 	 * @see #purgeDiagnosis(Diagnosis)
 	 */
 	@Override
@@ -173,7 +179,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 
 	/**
 	 * Gets the diagnosis data access object
-	 * 
+	 *
 	 * @return the diagnosis data access object
 	 */
 	public DiagnosisDAO getDiagnosisDAO() {
@@ -182,7 +188,7 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 
 	/**
 	 * Sets the diagnosis data access object
-	 * 
+	 *
 	 * @param diagnosisDAO
 	 */
 	public void setDiagnosisDAO(DiagnosisDAO diagnosisDAO) {
@@ -217,31 +223,35 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#saveDiagnosisAttributeType(DiagnosisAttributeType) 
+	 * @see org.openmrs.api.DiagnosisService#saveDiagnosisAttributeType(DiagnosisAttributeType)
 	 */
 	@Override
-	public DiagnosisAttributeType saveDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType) throws APIException {
+	public DiagnosisAttributeType saveDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType)
+	        throws APIException {
 		return diagnosisDAO.saveDiagnosisAttributeType(diagnosisAttributeType);
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#retireDiagnosisAttributeType(DiagnosisAttributeType, String) 
+	 * @see org.openmrs.api.DiagnosisService#retireDiagnosisAttributeType(DiagnosisAttributeType,
+	 *      String)
 	 */
 	@Override
-	public DiagnosisAttributeType retireDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType, String reason) throws APIException {
+	public DiagnosisAttributeType retireDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType, String reason)
+	        throws APIException {
 		return Context.getDiagnosisService().saveDiagnosisAttributeType(diagnosisAttributeType);
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#unretireDiagnosisAttributeType(DiagnosisAttributeType) 
+	 * @see org.openmrs.api.DiagnosisService#unretireDiagnosisAttributeType(DiagnosisAttributeType)
 	 */
 	@Override
-	public DiagnosisAttributeType unretireDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType) throws APIException {
+	public DiagnosisAttributeType unretireDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType)
+	        throws APIException {
 		return Context.getDiagnosisService().saveDiagnosisAttributeType(diagnosisAttributeType);
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#purgeDiagnosisAttributeType(DiagnosisAttributeType) 
+	 * @see org.openmrs.api.DiagnosisService#purgeDiagnosisAttributeType(DiagnosisAttributeType)
 	 */
 	@Override
 	public void purgeDiagnosisAttributeType(DiagnosisAttributeType diagnosisAttributeType) throws APIException {
@@ -249,11 +259,32 @@ public class DiagnosisServiceImpl extends BaseOpenmrsService implements Diagnosi
 	}
 
 	/**
-	 * @see org.openmrs.api.DiagnosisService#getDiagnosisAttributeByUuid(String) 
+	 * @see org.openmrs.api.DiagnosisService#getDiagnosisAttributeByUuid(String)
 	 */
 	@Override
 	@Transactional(readOnly = true)
 	public DiagnosisAttribute getDiagnosisAttributeByUuid(String uuid) throws APIException {
 		return diagnosisDAO.getDiagnosisAttributeByUuid(uuid);
 	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public <T> T getRefByUuid(Class<T> type, String uuid) {
+		if (DiagnosisAttributeType.class.equals(type)) {
+			return (T) getDiagnosisAttributeTypeByUuid(uuid);
+		}
+		if (Diagnosis.class.equals(type)) {
+			return (T) getDiagnosisByUuid(uuid);
+		}
+		if (DiagnosisAttribute.class.equals(type)) {
+			return (T) getDiagnosisAttributeByUuid(uuid);
+		}
+		throw new APIException("Unsupported type for getRefByUuid: " + type != null ? type.getName() : "null");
+	}
+
+	@Override
+	public List<Class<?>> getRefTypes() {
+		return Arrays.asList(DiagnosisAttributeType.class, Diagnosis.class, DiagnosisAttribute.class);
+	}
+
 }

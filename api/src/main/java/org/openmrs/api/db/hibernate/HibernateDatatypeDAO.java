@@ -11,71 +11,67 @@ package org.openmrs.api.db.hibernate;
 
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
-import org.hibernate.criterion.Restrictions;
 import org.openmrs.api.db.ClobDatatypeStorage;
 import org.openmrs.api.db.DatatypeDAO;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Repository;
 
 /**
  * Hibernate-specific Datatype-related functions. This class should not be used directly. All calls
  * should go through the {@link org.openmrs.api.DatatypeService} methods.
- * 
+ *
  * @see org.openmrs.api.db.DatatypeDAO
  * @see org.openmrs.api.DatatypeService
  */
+@Repository("datatypeDAO")
 public class HibernateDatatypeDAO implements DatatypeDAO {
-	
-	private SessionFactory sessionFactory;
-	
-	/**
-	 * Set session factory
-	 * 
-	 * @param sessionFactory
-	 */
-	public void setSessionFactory(SessionFactory sessionFactory) {
+
+	private final SessionFactory sessionFactory;
+
+	@Autowired
+	public HibernateDatatypeDAO(SessionFactory sessionFactory) {
 		this.sessionFactory = sessionFactory;
 	}
-	
+
 	/**
 	 * get current Hibernate session
-	 * 
+	 *
 	 * @return current Hibernate session
 	 */
 	private Session session() {
 		return sessionFactory.getCurrentSession();
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.DatatypeDAO#getClobDatatypeStorage(java.lang.Integer)
 	 */
 	@Override
 	public ClobDatatypeStorage getClobDatatypeStorage(Integer id) {
-		return (ClobDatatypeStorage) session().get(ClobDatatypeStorage.class, id);
+		return session().get(ClobDatatypeStorage.class, id);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.DatatypeDAO#getClobDatatypeStorageByUuid(java.lang.String)
 	 */
 	@Override
 	public ClobDatatypeStorage getClobDatatypeStorageByUuid(String uuid) {
-		return (ClobDatatypeStorage) session().createCriteria(ClobDatatypeStorage.class).add(Restrictions.eq("uuid", uuid))
-		        .uniqueResult();
+		return HibernateUtil.getUniqueEntityByUUID(sessionFactory, ClobDatatypeStorage.class, uuid);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.DatatypeDAO#saveClobDatatypeStorage(org.openmrs.api.db.ClobDatatypeStorage)
 	 */
 	@Override
 	public ClobDatatypeStorage saveClobDatatypeStorage(ClobDatatypeStorage storage) {
-		session().saveOrUpdate(storage);
-		return storage;
+		return HibernateUtil.saveOrUpdate(session(), storage);
 	}
-	
+
 	/**
 	 * @see org.openmrs.api.db.DatatypeDAO#deleteClobDatatypeStorage(org.openmrs.api.db.ClobDatatypeStorage)
 	 */
 	@Override
 	public void deleteClobDatatypeStorage(ClobDatatypeStorage storage) {
-		session().delete(storage);
+		session().remove(storage);
 	}
-	
+
 }

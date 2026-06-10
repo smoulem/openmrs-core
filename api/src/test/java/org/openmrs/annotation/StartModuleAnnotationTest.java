@@ -9,24 +9,24 @@
  */
 package org.openmrs.annotation;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-
 import org.junit.jupiter.api.Test;
 import org.openmrs.api.context.Context;
-import org.openmrs.test.jupiter.BaseContextSensitiveTest;
 import org.openmrs.test.StartModule;
+import org.openmrs.test.jupiter.BaseContextSensitiveTest;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @StartModule({ "org/openmrs/module/include/test1-1.0-SNAPSHOT.omod", "org/openmrs/module/include/test2-1.0-SNAPSHOT.omod" })
 public class StartModuleAnnotationTest extends BaseContextSensitiveTest {
-	
+
 	@Test
 	public void shouldStartModules() throws ClassNotFoundException {
-		
+
 		Class<?> test1ServiceClass = Context.loadClass("org.openmrs.module.test1.api.Test1Service");
 		Class<?> test2ServiceClass = Context.loadClass("org.openmrs.module.test2.api.Test2Service");
 		assertNotNull(test1ServiceClass);
 		assertNotNull(test2ServiceClass);
-		
+
 		assertNotNull(Context.getService(test1ServiceClass));
 		assertNotNull(Context.getService(test2ServiceClass));
 	}
