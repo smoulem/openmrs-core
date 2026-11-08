@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 import org.apache.commons.beanutils.BeanUtils;
 import org.apache.commons.collections.CollectionUtils;
@@ -73,6 +72,7 @@ import org.openmrs.parameter.ConceptSearchCriteriaBuilder;
 import org.openmrs.util.ConceptReferenceRangeUtility;
 import org.openmrs.util.OpenmrsConstants;
 import org.openmrs.util.OpenmrsUtil;
+import org.openmrs.util.UuidUtil;
 import org.openmrs.validator.ValidateUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -182,7 +182,7 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 				// create a new concept name from the matching cloned
 				// conceptName
 				ConceptName clone = uuidClonedConceptNameMap.get(changedName.getUuid());
-				clone.setUuid(UUID.randomUUID().toString());
+				clone.setUuid(UuidUtil.newUuidString());
 				clone.setDateCreated(null);
 				clone.setCreator(null);
 				concept.addName(clone);
@@ -602,8 +602,8 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 	 */
 	@Override
 	@Transactional(readOnly = true)
-	public ConceptClass getConceptClass(Integer i) {
-		return dao.getConceptClass(i);
+	public ConceptClass getConceptClass(Integer conceptClassId) {
+		return dao.getConceptClass(conceptClassId);
 	}
 
 	/**
@@ -705,10 +705,10 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 	 */
 	@Override
 	@Transactional(readOnly = true)
-	public List<Concept> getConceptsByConceptSet(Concept c) {
+	public List<Concept> getConceptsByConceptSet(Concept concept) {
 		Set<Integer> alreadySeen = new HashSet<>();
 		List<Concept> ret = new ArrayList<>();
-		explodeConceptSetHelper(c, ret, alreadySeen);
+		explodeConceptSetHelper(concept, ret, alreadySeen);
 		return ret;
 	}
 
@@ -810,7 +810,7 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 			conceptName.setCreator(Context.getAuthenticatedUser());
 			//If this is pre 1.9
 			if (conceptName.getUuid() == null) {
-				conceptName.setUuid(UUID.randomUUID().toString());
+				conceptName.setUuid(UuidUtil.newUuidString());
 			}
 			mappedConcept.addName(conceptName);
 			mappedConcept.setChangedBy(Context.getAuthenticatedUser());
@@ -835,7 +835,7 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 			ob.setLocation(cp.getEncounter().getLocation());
 			ob.setPerson(cp.getEncounter().getPatient());
 			if (ob.getUuid() == null) {
-				ob.setUuid(UUID.randomUUID().toString());
+				ob.setUuid(UuidUtil.newUuidString());
 			}
 			Context.getObsService().saveObs(ob, null);
 			cp.setObs(ob);
@@ -871,8 +871,8 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 	 */
 	@Override
 	@Transactional(readOnly = true)
-	public Concept getPrevConcept(Concept c) {
-		return dao.getPrevConcept(c);
+	public Concept getPrevConcept(Concept concept) {
+		return dao.getPrevConcept(concept);
 	}
 
 	/**
@@ -880,8 +880,8 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 	 */
 	@Override
 	@Transactional(readOnly = true)
-	public Concept getNextConcept(Concept c) {
-		return dao.getNextConcept(c);
+	public Concept getNextConcept(Concept concept) {
+		return dao.getNextConcept(concept);
 	}
 
 	/**
@@ -1433,12 +1433,6 @@ public class ConceptServiceImpl extends BaseOpenmrsService implements ConceptSer
 		ConceptName copy = new ConceptName();
 		try {
 			copy = (ConceptName) BeanUtils.cloneBean(conceptName);
-			// Create a new tags collection to avoid sharing the same Hibernate
-			// PersistentSet between the original and the clone, which causes
-			// "shared references to a collection" errors in Hibernate 7
-			if (conceptName.getTags() != null) {
-				copy.setTags(new HashSet<>(conceptName.getTags()));
-			}
 		} catch (IllegalAccessException | NoSuchMethodException | InvocationTargetException | InstantiationException e) {
 
 			log.warn(ERROR_MESSAGE, e);
