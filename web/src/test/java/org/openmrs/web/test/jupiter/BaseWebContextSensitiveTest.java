@@ -17,10 +17,9 @@ import org.springframework.test.context.web.WebAppConfiguration;
  * Web tests for controllers, etc. should use this class instead of the general
  * {@link BaseContextSensitiveTest} one.
  * <p>
- * The {@link ContextConfiguration} annotation adds the openmrs-servlet.xml context file so that
- * controller tests can pick up the right type of controller, etc.
+ * The {@link ContextConfiguration} annotation adds the alternate authentication scheme used by
+ * web-layer tests.
  */
 @WebAppConfiguration
-@ContextConfiguration(locations = { "classpath*:openmrs-servlet.xml",
-        "classpath*:AltAuthSchemeTestingApplicationContext.xml" })
+@ContextConfiguration(classes = AltAuthSchemeTestingConfig.class)
 public abstract class BaseWebContextSensitiveTest extends BaseContextSensitiveTest {}

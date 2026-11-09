@@ -22,7 +22,7 @@ import org.openmrs.web.filter.update.UpdateFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
-import org.springframework.web.context.support.XmlWebApplicationContext;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 
 /**
  * This class is only used to get access to the DispatcherServlet. <br>
@@ -63,7 +63,8 @@ public class DispatcherServlet extends org.springframework.web.servlet.Dispatche
 	public void reInitFrameworkServlet() throws ServletException {
 		log.debug("Framework being REinitialized");
 		Thread.currentThread().setContextClassLoader(OpenmrsClassLoader.getInstance());
-		((XmlWebApplicationContext) getWebApplicationContext()).setClassLoader(OpenmrsClassLoader.getInstance());
+		((AnnotationConfigWebApplicationContext) getWebApplicationContext())
+		        .setClassLoader(OpenmrsClassLoader.getInstance());
 
 		init();
 
@@ -95,7 +96,7 @@ public class DispatcherServlet extends org.springframework.web.servlet.Dispatche
 	 */
 	public void stopAndCloseApplicationContext() {
 		try {
-			XmlWebApplicationContext ctx = (XmlWebApplicationContext) getWebApplicationContext();
+			AnnotationConfigWebApplicationContext ctx = (AnnotationConfigWebApplicationContext) getWebApplicationContext();
 			ctx.stop();
 			ctx.close();
 		} catch (Exception e) {

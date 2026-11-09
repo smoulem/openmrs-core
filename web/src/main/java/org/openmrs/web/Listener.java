@@ -64,7 +64,7 @@ import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.context.ContextLoader;
 import org.springframework.web.context.WebApplicationContext;
-import org.springframework.web.context.support.XmlWebApplicationContext;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
@@ -250,7 +250,8 @@ public final class Listener extends ContextLoader implements ServletContextListe
 				 * so that the context is not cached and hence not garbage collected
 				 */
 				log.debug("Refreshing WAC");
-				XmlWebApplicationContext context = (XmlWebApplicationContext) createWebApplicationContext(servletContext);
+				AnnotationConfigWebApplicationContext context = (AnnotationConfigWebApplicationContext) createWebApplicationContext(
+				    servletContext);
 				configureAndRefreshWebApplicationContext(context, servletContext);
 				servletContext.setAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, context);
 				log.debug("Done refreshing WAC");

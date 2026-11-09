@@ -9,8 +9,6 @@
  */
 package org.openmrs.test.jupiter;
 
-import java.net.URL;
-import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -18,6 +16,9 @@ import java.util.Properties;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
+import org.openmrs.annotation.Handler;
+import org.openmrs.annotation.OpenmrsProfileExcludeFilter;
+import org.openmrs.annotation.OpenmrsProfileIncludeFilter;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.SerializedObjectDAOTest;
 import org.openmrs.module.ModuleConstants;
@@ -25,15 +26,15 @@ import org.openmrs.module.ModuleFactory;
 import org.openmrs.module.ModuleInteroperabilityTest;
 import org.openmrs.module.ModuleUtil;
 import org.openmrs.test.StartModule;
-import org.openmrs.util.OpenmrsClassLoader;
 import org.openmrs.util.PrivilegeConstants;
+import org.openmrs.util.TestTypeFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.beans.factory.xml.XmlBeanDefinitionReader;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.ClassPathBeanDefinitionScanner;
 import org.springframework.context.support.GenericApplicationContext;
-import org.springframework.core.io.UrlResource;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.test.context.TestContext;
 import org.springframework.test.context.support.AbstractTestExecutionListener;
 
@@ -107,13 +108,6 @@ public class StartModuleExecutionListener extends AbstractTestExecutionListener 
 				 */
 				removeFilteredBeanDefinitions(testContext.getApplicationContext());
 				GenericApplicationContext ctx = new GenericApplicationContext(testContext.getApplicationContext());
-
-				XmlBeanDefinitionReader xmlReader = new XmlBeanDefinitionReader(ctx);
-				Enumeration<URL> list = OpenmrsClassLoader.getInstance().getResources("moduleApplicationContext.xml");
-				while (list.hasMoreElements()) {
-					xmlReader.loadBeanDefinitions(new UrlResource(list.nextElement()));
-				}
-
 				Context.setUseSystemClassLoader(false);
 				ctx.refresh();
 			}
@@ -124,9 +118,14 @@ public class StartModuleExecutionListener extends AbstractTestExecutionListener 
 	 * Starting modules may require to remove beans definitions that were initially loaded.
 	 */
 	protected void removeFilteredBeanDefinitions(ApplicationContext context) {
-		// first looking at a context loading the bean definitions "now"
+		// First scan the current classpath to identify profile beans that are no longer applicable.
 		GenericApplicationContext ctx = new GenericApplicationContext();
-		(new XmlBeanDefinitionReader(ctx)).loadBeanDefinitions("classpath:applicationContext-service.xml");
+		ClassPathBeanDefinitionScanner scanner = new ClassPathBeanDefinitionScanner(ctx);
+		scanner.addIncludeFilter(new AnnotationTypeFilter(Handler.class));
+		scanner.addIncludeFilter(new OpenmrsProfileIncludeFilter());
+		scanner.addExcludeFilter(new TestTypeFilter());
+		scanner.addExcludeFilter(new OpenmrsProfileExcludeFilter());
+		scanner.scan("org.openmrs");
 		Set<String> filteredBeanNames = new HashSet<>();
 		for (String beanName : ctx.getBeanDefinitionNames()) {
 			if (beanName.startsWith("openmrsProfile")) {

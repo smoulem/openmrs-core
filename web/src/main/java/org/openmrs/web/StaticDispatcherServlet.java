@@ -16,7 +16,7 @@ import org.openmrs.util.OpenmrsClassLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
-import org.springframework.web.context.support.XmlWebApplicationContext;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 
 /**
  * This class is only used to get access to the dispatcher servlet that handles static content. <br>
@@ -55,14 +55,15 @@ public class StaticDispatcherServlet extends org.springframework.web.servlet.Dis
 		log.info("Application context for the static content dispatcher servlet is being refreshed");
 
 		Thread.currentThread().setContextClassLoader(OpenmrsClassLoader.getInstance());
-		((XmlWebApplicationContext) getWebApplicationContext()).setClassLoader(OpenmrsClassLoader.getInstance());
+		((AnnotationConfigWebApplicationContext) getWebApplicationContext())
+		        .setClassLoader(OpenmrsClassLoader.getInstance());
 
 		refresh();
 	}
 
 	public void stopAndCloseApplicationContext() {
 		try {
-			XmlWebApplicationContext ctx = (XmlWebApplicationContext) getWebApplicationContext();
+			AnnotationConfigWebApplicationContext ctx = (AnnotationConfigWebApplicationContext) getWebApplicationContext();
 			ctx.stop();
 			ctx.close();
 		} catch (Exception e) {

@@ -77,6 +77,7 @@ import org.openmrs.PersonAttribute;
 import org.openmrs.PersonName;
 import org.openmrs.User;
 import org.openmrs.annotation.OpenmrsProfileExcludeFilter;
+import org.openmrs.api.OpenmrsApplicationContextConfig;
 import org.openmrs.api.cache.ApiCacheTestUtil;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.context.ContextAuthenticationException;
@@ -88,6 +89,7 @@ import org.openmrs.test.OpenmrsMetadataHandler;
 import org.openmrs.test.SkipBaseSetup;
 import org.openmrs.test.SkipBaseSetupAnnotationExecutionListener;
 import org.openmrs.test.TestUtil;
+import org.openmrs.test.TestingApplicationContextConfig;
 import org.openmrs.util.DatabaseUtil;
 import org.openmrs.util.OpenmrsClassLoader;
 import org.openmrs.util.OpenmrsConstants;
@@ -113,8 +115,7 @@ import static org.springframework.test.context.TestExecutionListeners.MergeMode.
  *
  * @since 2.4.0
  */
-@ContextConfiguration(locations = { "classpath:applicationContext-service.xml", "classpath*:moduleApplicationContext.xml",
-        "classpath*:TestingApplicationContext.xml" })
+@ContextConfiguration(classes = { OpenmrsApplicationContextConfig.class, TestingApplicationContextConfig.class })
 @TestExecutionListeners(listeners = { SkipBaseSetupAnnotationExecutionListener.class,
         StartModuleExecutionListener.class }, mergeMode = MERGE_WITH_DEFAULTS)
 @ExtendWith(SpringExtension.class)

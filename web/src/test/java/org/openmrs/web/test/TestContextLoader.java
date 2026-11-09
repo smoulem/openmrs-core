@@ -15,7 +15,7 @@ import org.springframework.mock.web.MockServletContext;
 import org.springframework.test.context.MergedContextConfiguration;
 import org.springframework.test.context.support.AbstractContextLoader;
 import org.springframework.web.context.WebApplicationContext;
-import org.springframework.web.context.support.XmlWebApplicationContext;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 
 /**
  * The only reason why i created this class is to be able to create an application context which can
@@ -29,7 +29,7 @@ public class TestContextLoader extends AbstractContextLoader {
 
 	@Override
 	public final ConfigurableApplicationContext loadContext(String... locations) throws Exception {
-		XmlWebApplicationContext context = new XmlWebApplicationContext();
+		AnnotationConfigWebApplicationContext context = new AnnotationConfigWebApplicationContext();
 		context.setConfigLocations(locations);
 		MockServletContext sc = new MockServletContext();
 		sc.setAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, context);
@@ -48,6 +48,12 @@ public class TestContextLoader extends AbstractContextLoader {
 	 */
 	@Override
 	public ApplicationContext loadContext(MergedContextConfiguration mergedConfig) throws Exception {
-		return loadContext(mergedConfig.getLocations());
+		AnnotationConfigWebApplicationContext context = new AnnotationConfigWebApplicationContext();
+		MockServletContext sc = new MockServletContext();
+		sc.setAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, context);
+		context.setServletContext(sc);
+		context.register(mergedConfig.getClasses());
+		context.refresh();
+		return context;
 	}
 }

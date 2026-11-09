@@ -66,8 +66,8 @@ import org.openmrs.web.DispatcherServlet;
 import org.openmrs.web.StaticDispatcherServlet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
-import org.springframework.web.context.support.XmlWebApplicationContext;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
@@ -899,9 +899,9 @@ public class WebModuleUtil {
 	 * @param startedModule the module that was just started and waiting on the context refresh
 	 * @return The newly refreshed webApplicationContext
 	 */
-	public static XmlWebApplicationContext refreshWAC(ServletContext servletContext, boolean isOpenmrsStartup,
+	public static AnnotationConfigWebApplicationContext refreshWAC(ServletContext servletContext, boolean isOpenmrsStartup,
 	        Module startedModule) {
-		XmlWebApplicationContext wac = (XmlWebApplicationContext) WebApplicationContextUtils
+		AnnotationConfigWebApplicationContext wac = (AnnotationConfigWebApplicationContext) WebApplicationContextUtils
 		        .getWebApplicationContext(servletContext);
 		log.debug("Refreshing Web Application Context of class: {}", wac.getClass().getName());
 
@@ -913,8 +913,8 @@ public class WebModuleUtil {
 			staticDispatcherServlet.stopAndCloseApplicationContext();
 		}
 
-		XmlWebApplicationContext newAppContext = (XmlWebApplicationContext) ModuleUtil.refreshApplicationContext(wac,
-		    isOpenmrsStartup, startedModule);
+		AnnotationConfigWebApplicationContext newAppContext = (AnnotationConfigWebApplicationContext) ModuleUtil
+		        .refreshApplicationContext(wac, isOpenmrsStartup, startedModule);
 
 		try {
 			// must "refresh" the spring dispatcherservlet as well to add in

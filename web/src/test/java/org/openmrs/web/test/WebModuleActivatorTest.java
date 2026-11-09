@@ -28,7 +28,7 @@ import org.openmrs.web.Listener;
 import org.springframework.context.support.AbstractRefreshableApplicationContext;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.util.ReflectionUtils;
-import org.springframework.web.context.support.XmlWebApplicationContext;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasSize;
@@ -44,8 +44,7 @@ import static org.openmrs.module.ModuleFactory.getStartedModules;
  * out, just put these tests in ModuleActivatorTest NOTE: The way we start, stop, unload, etc,
  * modules is copied from ModuleListController
  */
-@ContextConfiguration(locations = {
-        "classpath*:webModuleApplicationContext.xml" }, inheritLocations = true, loader = TestContextLoader.class)
+@ContextConfiguration(classes = WebModuleTestConfig.class, inheritLocations = true, loader = TestContextLoader.class)
 @SkipBaseSetup
 public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 
@@ -83,7 +82,7 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 
 		Module module = ModuleFactory.getModuleById(MODULE3_ID);
 		ModuleFactory.stopModule(module);
-		WebModuleUtil.stopModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext());
+		WebModuleUtil.stopModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext());
 
 		//module3 should have stopped
 		assertTrue(moduleTestData.getWillStopCallCount(MODULE3_ID) == 1);
@@ -121,7 +120,8 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 
 		//start module3 which was previously stopped
 		ModuleFactory.startModule(module);
-		WebModuleUtil.startModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext(), false);
+		WebModuleUtil.startModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext(),
+		    false);
 
 		assertTrue(module.isStarted());
 		assertTrue(ModuleFactory.isModuleStarted(module));
@@ -148,7 +148,7 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 
 		//At OpenMRS start up:
 		//  willRefreshContext(), contextRefreshed(), willStart() and started() methods get called for all started modules' activators
-		Listener.performWebStartOfModules(((XmlWebApplicationContext) applicationContext).getServletContext());
+		Listener.performWebStartOfModules(((AnnotationConfigWebApplicationContext) applicationContext).getServletContext());
 
 		assertTrue(moduleTestData.getWillRefreshContextCallCount(MODULE1_ID) == 1);
 		assertTrue(moduleTestData.getWillRefreshContextCallCount(MODULE2_ID) == 1);
@@ -172,7 +172,7 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 		//first completely remove module3
 		Module module = ModuleFactory.getModuleById(MODULE3_ID);
 		ModuleFactory.stopModule(module);
-		WebModuleUtil.stopModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext());
+		WebModuleUtil.stopModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext());
 		ModuleFactory.unloadModule(module);
 
 		init(); //to initialize for the condition below:
@@ -188,7 +188,8 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 		File file = new File(url.getFile());
 		module = ModuleFactory.loadModule(file);
 		ModuleFactory.startModule(module);
-		WebModuleUtil.startModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext(), false);
+		WebModuleUtil.startModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext(),
+		    false);
 
 		assertTrue(module.isStarted());
 		assertTrue(ModuleFactory.isModuleStarted(module));
@@ -222,9 +223,10 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 		createWebInfFolderIfNotExist();
 
 		ModuleFactory.stopModule(module, false, true); // stop the module with these parameters so that mandatory modules can be upgraded
-		WebModuleUtil.stopModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext());
+		WebModuleUtil.stopModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext());
 		Module newModule = ModuleFactory.updateModule(module);
-		WebModuleUtil.startModule(newModule, ((XmlWebApplicationContext) applicationContext).getServletContext(), false);
+		WebModuleUtil.startModule(newModule,
+		    ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext(), false);
 
 		//module3 should have upgraded from version 1.0 to 2.0
 		module = ModuleFactory.getModuleById(MODULE3_ID);
@@ -252,7 +254,7 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 
 		//now stop module1
 		ModuleFactory.stopModule(module, false, true); // stop the module with these parameters so that mandatory modules can be upgraded
-		WebModuleUtil.stopModule(module, ((XmlWebApplicationContext) applicationContext).getServletContext());
+		WebModuleUtil.stopModule(module, ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext());
 
 		//module2 and module3 should have stopped since they depend on module1
 		assertTrue(!ModuleFactory.getModuleById(MODULE1_ID).isStarted());
@@ -263,7 +265,8 @@ public class WebModuleActivatorTest extends BaseModuleActivatorTest {
 		Module newModule = ModuleFactory.updateModule(module);
 
 		//web start the upgraded module1
-		WebModuleUtil.startModule(newModule, ((XmlWebApplicationContext) applicationContext).getServletContext(), false);
+		WebModuleUtil.startModule(newModule,
+		    ((AnnotationConfigWebApplicationContext) applicationContext).getServletContext(), false);
 
 		//module1 should have upgraded from version 1.0 to 2.0
 		module = ModuleFactory.getModuleById(MODULE1_ID);

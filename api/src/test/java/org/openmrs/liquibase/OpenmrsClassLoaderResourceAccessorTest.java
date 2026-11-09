@@ -29,8 +29,8 @@ public class OpenmrsClassLoaderResourceAccessorTest {
 	public void shouldGetSingleResourceAsStream() throws Exception {
 		ClassLoader classLoader = mock(ClassLoader.class);
 
-		when(classLoader.getResources(any()))
-		        .thenReturn(OpenmrsClassLoader.getSystemClassLoader().getResources("TestingApplicationContext.xml"));
+		when(classLoader.getResources(any())).thenReturn(
+		    OpenmrsClassLoader.getSystemClassLoader().getResources("org/openmrs/api/OpenmrsApplicationContextConfig.class"));
 
 		OpenmrsClassLoaderResourceAccessor classLoaderFileOpener = new OpenmrsClassLoaderResourceAccessor(classLoader);
 		try (InputStreamList inputStreamSet = classLoaderFileOpener.openStreams(null, "some path")) {

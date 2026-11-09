@@ -13,11 +13,8 @@ import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.BeanCreationException;
-import org.springframework.beans.factory.support.DefaultListableBeanFactory;
-import org.springframework.beans.factory.xml.XmlBeanDefinitionReader;
-import org.springframework.context.expression.StandardBeanExpressionResolver;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,8 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the {@code openmrsPasswordEncoder} bean as defined in applicationContext-service.xml, under
- * different {@code security.*} runtime properties.
+ * Tests the {@code openmrsPasswordEncoder} bean under different {@code security.*} runtime
+ * properties.
  * <p>
  * Only the encoder beans are instantiated, so each test can use its own properties without starting
  * a second application context. The shared test harness does not support more than one context per
@@ -115,21 +112,19 @@ class OpenmrsPasswordEncoderBeanTest {
 		return properties;
 	}
 
-	/**
-	 * Builds {@code openmrsPasswordEncoder} and its dependencies from applicationContext-service.xml. A
-	 * bare bean factory only parses the other definitions, so nothing else in the file is started.
-	 */
+	/** Builds only the password-encoder configuration so the database context is not started. */
 	private static PasswordEncoder encoderBean(Properties properties) {
-		DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
-		new XmlBeanDefinitionReader(beanFactory)
-		        .loadBeanDefinitions(new ClassPathResource("applicationContext-service.xml"));
-		beanFactory.setBeanExpressionResolver(new StandardBeanExpressionResolver());
-
+		AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
 		PropertySourcesPlaceholderConfigurer configurer = new PropertySourcesPlaceholderConfigurer();
 		configurer.setProperties(properties);
-		configurer.postProcessBeanFactory(beanFactory);
-
-		return beanFactory.getBean("openmrsPasswordEncoder", PasswordEncoder.class);
+		context.addBeanFactoryPostProcessor(configurer);
+		context.register(PasswordEncoderConfig.class);
+		context.refresh();
+		try {
+			return context.getBean("openmrsPasswordEncoder", PasswordEncoder.class);
+		} finally {
+			context.close();
+		}
 	}
 
 	/**

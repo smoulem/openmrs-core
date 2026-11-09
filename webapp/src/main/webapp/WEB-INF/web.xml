@@ -19,13 +19,12 @@
 	<description>@WEBAPP.DESCRIPTION@</description> 
 
 	<context-param>
-        <param-name>contextConfigLocation</param-name>
-        <param-value>
-        	classpath*:/moduleApplicationContext.xml
-        	classpath*:/webModuleApplicationContext.xml
-        	classpath:applicationContext-service.xml
-        	classpath:openmrs-servlet.xml
-        </param-value>
+	    <param-name>contextClass</param-name>
+	    <param-value>org.springframework.web.context.support.AnnotationConfigWebApplicationContext</param-value>
+	</context-param>
+	<context-param>
+	    <param-name>contextConfigLocation</param-name>
+	    <param-value>org.openmrs.api.OpenmrsApplicationContextConfig</param-value>
     </context-param>
     
     <!-- These init parameter(s) are read in by org.openmrs.web.Listener -->
@@ -323,6 +322,10 @@
 
 	        </param-value>
 	    </init-param>
+		<init-param>
+			<param-name>contextClass</param-name>
+			<param-value>org.springframework.web.context.support.AnnotationConfigWebApplicationContext</param-value>
+		</init-param>
 		<multipart-config>
 			<max-file-size>75000000</max-file-size>
 			<max-request-size>75000000</max-request-size>
@@ -333,6 +336,14 @@
 	<servlet>
 		<servlet-name>openmrs_static_content</servlet-name>
 		<servlet-class>org.openmrs.web.StaticDispatcherServlet</servlet-class>
+		<init-param>
+			<param-name>contextClass</param-name>
+			<param-value>org.springframework.web.context.support.AnnotationConfigWebApplicationContext</param-value>
+		</init-param>
+		<init-param>
+			<param-name>contextConfigLocation</param-name>
+			<param-value>org.openmrsstatic.StaticContentConfig</param-value>
+		</init-param>
 		<init-param>
 			<param-name>detectAllViewResolvers</param-name>
 			<param-value>false</param-value>
