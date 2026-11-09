@@ -9,18 +9,54 @@
  */
 package org.openmrs.hl7;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.BaseChangeableOpenmrsMetadata;
+import org.openmrs.User;
 
 /**
  * Names a unique location that hl7 messages could be coming from.
  */
 @Audited
+@Entity
+@Table(name = "hl7_source")
+@AttributeOverrides({ @AttributeOverride(name = "name", column = @Column(name = "name", nullable = false, length = 255)),
+        @AttributeOverride(name = "description", column = @Column(name = "description", nullable = false, length = 2048)) })
 public class HL7Source extends BaseChangeableOpenmrsMetadata {
 
 	private static final long serialVersionUID = 3062136520728193223L;
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "hl7_source_id")
 	private Integer hl7SourceId;
+
+	@Transient
+	private User changedBy;
+
+	@Transient
+	private java.util.Date dateChanged;
+
+	@Transient
+	private Boolean retired;
+
+	@Transient
+	private java.util.Date dateRetired;
+
+	@Transient
+	private User retiredBy;
+
+	@Transient
+	private String retireReason;
 
 	/**
 	 * Empty constructor

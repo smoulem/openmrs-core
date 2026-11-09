@@ -12,6 +12,17 @@ package org.openmrs;
 import java.io.Serializable;
 import java.util.Comparator;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
 import org.hibernate.envers.Audited;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -25,33 +36,71 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
  * @see org.openmrs.Field
  */
 @Audited
+@Entity
+@Table(name = "form_field")
 public class FormField extends BaseChangeableOpenmrsMetadata implements java.io.Serializable, Comparable<FormField> {
 
 	public static final long serialVersionUID = 3456L;
 
 	// Fields
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "form_field_id")
 	protected Integer formFieldId;
 
+	@ManyToOne(fetch = FetchType.LAZY, cascade = { jakarta.persistence.CascadeType.MERGE,
+	        jakarta.persistence.CascadeType.PERSIST })
+	@JoinColumn(name = "parent_form_field")
 	protected FormField parent;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "form_id", nullable = false)
 	protected Form form;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY, cascade = { jakarta.persistence.CascadeType.MERGE,
+	        jakarta.persistence.CascadeType.PERSIST })
+	@JoinColumn(name = "field_id", nullable = false)
 	protected Field field;
 
+	@Column(name = "field_number")
 	protected Integer fieldNumber;
 
+	@Column(name = "field_part", length = 5)
 	protected String fieldPart;
 
+	@Column(name = "page_number")
 	protected Integer pageNumber;
 
+	@Column(name = "min_occurs")
 	protected Integer minOccurs;
 
+	@Column(name = "max_occurs")
 	protected Integer maxOccurs;
 
+	@Column(name = "required", nullable = false)
 	protected Boolean required = false;
 
+	@Column(name = "sort_weight")
 	protected Float sortWeight;
+
+	@Transient
+	private String name;
+
+	@Transient
+	private String description;
+
+	@Transient
+	private Boolean retired;
+
+	@Transient
+	private java.util.Date dateRetired;
+
+	@Transient
+	private User retiredBy;
+
+	@Transient
+	private String retireReason;
 
 	// Constructors
 

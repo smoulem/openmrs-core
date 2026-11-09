@@ -12,10 +12,19 @@ package org.openmrs;
 import java.util.Date;
 
 import jakarta.persistence.Cacheable;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.envers.Audited;
+import org.hibernate.type.SqlTypes;
 import org.openmrs.customdatatype.CustomDatatype;
 import org.openmrs.customdatatype.CustomDatatypeUtil;
 import org.openmrs.customdatatype.CustomValueDescriptor;
@@ -30,12 +39,18 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 @Audited
 @Cacheable
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+@Entity
+@Table(name = "global_property")
 public class GlobalProperty extends BaseOpenmrsObject implements CustomValueDescriptor, SingleCustomValue<GlobalProperty> {
 
 	private static final long serialVersionUID = 1L;
 
+	@Id
+	@Column(name = "property", length = 255)
 	private String property = "";
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(name = "property_value", length = 65535)
 	private String propertyValue = "";
 
 	private transient Object typedValue;
@@ -43,24 +58,41 @@ public class GlobalProperty extends BaseOpenmrsObject implements CustomValueDesc
 	// if true, indicates that setValue has been called, and we need to invoke CustomDatatype's save
 	private boolean dirty = false;
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(length = 65535)
 	private String description = "";
 
+	@Column(name = "datatype", length = 255)
 	private String datatypeClassname;
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(name = "datatype_config", length = 65535)
 	private String datatypeConfig;
 
+	@Column(name = "preferred_handler", length = 255)
 	private String preferredHandlerClassname;
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(name = "handler_config", length = 65535)
 	private String handlerConfig;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "changed_by")
 	private User changedBy;
 
+	@Column(name = "date_changed")
 	private Date dateChanged;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "view_privilege")
 	private Privilege viewPrivilege;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "edit_privilege")
 	private Privilege editPrivilege;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "delete_privilege")
 	private Privilege deletePrivilege;
 
 	/**

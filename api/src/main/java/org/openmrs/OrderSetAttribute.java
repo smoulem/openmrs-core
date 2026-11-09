@@ -10,6 +10,12 @@
 
 package org.openmrs;
 
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Table;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.attribute.Attribute;
 import org.openmrs.attribute.BaseAttribute;
@@ -21,10 +27,16 @@ import org.openmrs.attribute.BaseAttribute;
  * @since 2.4.0
  */
 @Audited
+@Entity
+@Table(name = "order_set_attribute")
+@AssociationOverride(name = "owner", joinColumns = @JoinColumn(name = "order_set_id", nullable = false))
 public class OrderSetAttribute extends BaseAttribute<OrderSetAttributeType, OrderSet> implements Attribute<OrderSetAttributeType, OrderSet> {
 
 	private static final long serialVersionUID = 1L;
 
+	@jakarta.persistence.Id
+	@jakarta.persistence.GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
+	@Column(name = "order_set_attribute_id")
 	private Integer orderSetAttributeId;
 
 	/**

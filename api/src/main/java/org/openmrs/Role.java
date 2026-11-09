@@ -13,7 +13,16 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 
+import jakarta.persistence.AttributeOverride;
 import jakarta.persistence.Cacheable;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
@@ -34,6 +43,9 @@ import org.slf4j.LoggerFactory;
 @Cacheable
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 @Audited
+@Entity
+@Table(name = "role")
+@AttributeOverride(name = "name", column = @Column(name = "role", nullable = false, length = 50))
 public class Role extends BaseChangeableOpenmrsMetadata {
 
 	public static final long serialVersionUID = 1234233L;
@@ -42,13 +54,47 @@ public class Role extends BaseChangeableOpenmrsMetadata {
 
 	// Fields
 
+	@Transient
 	private String role;
 
+	@ManyToMany(fetch = FetchType.EAGER)
+	@JoinTable(name = "role_privilege", joinColumns = @JoinColumn(name = "role"), inverseJoinColumns = @JoinColumn(name = "privilege"))
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<Privilege> privileges;
 
+	@ManyToMany(fetch = FetchType.EAGER)
+	@JoinTable(name = "role_role", joinColumns = @JoinColumn(name = "child_role"), inverseJoinColumns = @JoinColumn(name = "parent_role"))
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<Role> inheritedRoles;
 
+	@ManyToMany(fetch = FetchType.EAGER)
+	@JoinTable(name = "role_role", joinColumns = @JoinColumn(name = "parent_role"), inverseJoinColumns = @JoinColumn(name = "child_role"))
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<Role> childRoles;
+
+	@Transient
+	private User creator;
+
+	@Transient
+	private java.util.Date dateCreated;
+
+	@Transient
+	private User changedBy;
+
+	@Transient
+	private java.util.Date dateChanged;
+
+	@Transient
+	private Boolean retired;
+
+	@Transient
+	private java.util.Date dateRetired;
+
+	@Transient
+	private User retiredBy;
+
+	@Transient
+	private String retireReason;
 
 	// Constructors
 
@@ -83,7 +129,7 @@ public class Role extends BaseChangeableOpenmrsMetadata {
 
 	@Override
 	public String getName() {
-		return this.getRole();
+		return super.getName();
 	}
 
 	/**
@@ -124,14 +170,14 @@ public class Role extends BaseChangeableOpenmrsMetadata {
 	 * @return Returns the role.
 	 */
 	public String getRole() {
-		return role;
+		return getName();
 	}
 
 	/**
 	 * @param role The role to set.
 	 */
 	public void setRole(String role) {
-		this.role = role;
+		setName(role);
 	}
 
 	/**

@@ -9,6 +9,13 @@
  */
 package org.openmrs.hl7;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import org.hibernate.envers.Audited;
 
 /**
@@ -17,14 +24,21 @@ import org.hibernate.envers.Audited;
  * @see HL7Service
  */
 @Audited
+@Entity
+@Table(name = "hl7_in_queue")
 public class HL7InQueue extends HL7QueueItem {
 
 	private static final long serialVersionUID = 8882704913734764446L;
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "hl7_in_queue_id")
 	private Integer hl7InQueueId;
 
+	@Column(name = "error_msg", length = 16777215)
 	private String errorMessage;
 
+	@Column(name = "message_state")
 	private Integer messageState;
 
 	/**

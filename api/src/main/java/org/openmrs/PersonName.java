@@ -16,6 +16,15 @@ import java.util.Date;
 import java.util.List;
 
 import jakarta.persistence.Cacheable;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.hibernate.annotations.Cache;
@@ -49,6 +58,8 @@ import static org.apache.commons.lang3.StringUtils.defaultString;
 @Audited
 @Cacheable
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+@Entity
+@Table(name = "person_name")
 public class PersonName extends BaseChangeableOpenmrsData implements java.io.Serializable, Cloneable, Comparable<PersonName> {
 
 	public static final long serialVersionUID = 4353L;
@@ -57,44 +68,58 @@ public class PersonName extends BaseChangeableOpenmrsData implements java.io.Ser
 
 	// Fields
 	@DocumentId
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "person_name_id")
 	private Integer personNameId;
 
 	@IndexedEmbedded(includeEmbeddedObjectId = true)
 	@AssociationInverseSide(inversePath = @ObjectPath({ @PropertyValue(propertyName = "names") }))
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "person_id")
 	private Person person;
 
+	@Column(nullable = false)
 	private Boolean preferred = false;
 
 	@FullTextField(name = "givenNameExact", analyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "givenNameStart", analyzer = SearchAnalysis.START_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "givenNameAnywhere", analyzer = SearchAnalysis.ANYWHERE_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "givenNameSoundex", analyzer = SearchAnalysis.SOUNDEX_ANALYZER)
+	@Column(name = "given_name", length = 50)
 	private String givenName;
 
+	@Column(length = 50)
 	private String prefix;
 
 	@FullTextField(name = "middleNameExact", analyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "middleNameStart", analyzer = SearchAnalysis.START_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "middleNameAnywhere", analyzer = SearchAnalysis.ANYWHERE_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "middleNameSoundex", analyzer = SearchAnalysis.SOUNDEX_ANALYZER)
+	@Column(name = "middle_name", length = 50)
 	private String middleName;
 
+	@Column(name = "family_name_prefix", length = 50)
 	private String familyNamePrefix;
 
 	@FullTextField(name = "familyNameExact", analyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyNameStart", analyzer = SearchAnalysis.START_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyNameAnywhere", analyzer = SearchAnalysis.ANYWHERE_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyNameSoundex", analyzer = SearchAnalysis.SOUNDEX_ANALYZER)
+	@Column(name = "family_name", length = 50)
 	private String familyName;
 
 	@FullTextField(name = "familyName2Exact", analyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyName2Start", analyzer = SearchAnalysis.START_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyName2Anywhere", analyzer = SearchAnalysis.ANYWHERE_ANALYZER, searchAnalyzer = SearchAnalysis.EXACT_ANALYZER)
 	@FullTextField(name = "familyName2Soundex", analyzer = SearchAnalysis.SOUNDEX_ANALYZER)
+	@Column(name = "family_name2", length = 50)
 	private String familyName2;
 
+	@Column(name = "family_name_suffix", length = 50)
 	private String familyNameSuffix;
 
+	@Column(length = 50)
 	private String degree;
 
 	private static String format = OpenmrsConstants.PERSON_NAME_FORMAT_SHORT;

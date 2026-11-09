@@ -12,6 +12,13 @@ package org.openmrs;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Table;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.util.CollectionUtil;
 
@@ -23,34 +30,48 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
  * @see Concept
  */
 @Audited
+@Entity
+@Table(name = "concept_numeric")
+@PrimaryKeyJoinColumn(name = "concept_id")
 public class ConceptNumeric extends Concept {
 
 	public static final long serialVersionUID = 47323L;
 
 	// Fields
 
+	@Column(name = "hi_absolute")
 	private Double hiAbsolute;
 
+	@Column(name = "hi_critical")
 	private Double hiCritical;
 
+	@Column(name = "hi_normal")
 	private Double hiNormal;
 
+	@Column(name = "low_absolute")
 	private Double lowAbsolute;
 
+	@Column(name = "low_critical")
 	private Double lowCritical;
 
+	@Column(name = "low_normal")
 	private Double lowNormal;
 
+	@Column(length = 50)
 	private String units;
 
+	@Column(name = "allow_decimal", nullable = false)
 	private Boolean allowDecimal = false;
 
+	@OneToMany(mappedBy = "concept", cascade = jakarta.persistence.CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+	@jakarta.persistence.OrderBy("conceptReferenceRangeId ASC")
 	private Set<ConceptReferenceRange> referenceRanges;
 
 	/**
 	 * displayPrecision, represents the number of significant digits to be used for display of a numeric
 	 * value
 	 */
+	@Column(name = "display_precision")
 	private Integer displayPrecision;
 
 	// Constructors

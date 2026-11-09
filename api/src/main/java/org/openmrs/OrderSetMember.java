@@ -9,27 +9,60 @@
  */
 package org.openmrs;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.envers.Audited;
+import org.hibernate.type.SqlTypes;
 
 /**
  * @since 1.12 OrderSetMember
  */
 @Audited
+@Entity
+@Table(name = "order_set_member")
 public class OrderSetMember extends BaseChangeableOpenmrsMetadata {
 
 	public static final long serialVersionUID = 72232L;
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "order_set_member_id")
 	private Integer orderSetMemberId;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "order_type", nullable = false)
 	private OrderType orderType;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "order_set_id", insertable = false, updatable = false)
 	private OrderSet orderSet;
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(name = "order_template", length = 65535)
 	private String orderTemplate;
 
+	@Column(name = "order_template_type", length = 1024)
 	private String orderTemplateType;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "concept_id", nullable = false)
 	private Concept concept;
+
+	@Transient
+	private String name;
+
+	@Transient
+	private String description;
 
 	/**
 	 * Gets the orderSetMemberId

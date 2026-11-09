@@ -10,13 +10,30 @@
 
 package org.openmrs;
 
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Table;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.attribute.Attribute;
 import org.openmrs.attribute.BaseAttribute;
 
 @Audited
+@Entity
+@Table(name = "patient_program_attribute")
+@AssociationOverride(name = "owner", joinColumns = @JoinColumn(name = "patient_program_id", nullable = false))
+@AttributeOverride(name = "valueReference", column = @Column(name = "value_reference", length = 65535))
 public class PatientProgramAttribute extends BaseAttribute<ProgramAttributeType, PatientProgram> implements Attribute<ProgramAttributeType, PatientProgram> {
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "patient_program_attribute_id")
 	private Integer patientProgramAttributeId;
 
 	@Override

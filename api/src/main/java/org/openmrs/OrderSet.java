@@ -12,8 +12,24 @@ package org.openmrs;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderColumn;
+import jakarta.persistence.Table;
+
+import org.hibernate.annotations.Parameter;
+import org.hibernate.annotations.Type;
 import org.hibernate.envers.Audited;
 import org.openmrs.api.APIException;
+import org.openmrs.api.db.hibernate.type.StringEnumType;
 import org.openmrs.util.CollectionUtil;
 
 /**
@@ -22,6 +38,8 @@ import org.openmrs.util.CollectionUtil;
  * @since 1.12
  */
 @Audited
+@Entity
+@Table(name = "order_set")
 public class OrderSet extends BaseCustomizableMetadata<OrderSetAttribute> {
 
 	public static final long serialVersionUID = 72232L;
@@ -37,12 +55,22 @@ public class OrderSet extends BaseCustomizableMetadata<OrderSetAttribute> {
 		ANY
 	}
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "order_set_id")
 	private Integer orderSetId;
 
+	@Type(value = StringEnumType.class, parameters = @Parameter(name = "enumClass", value = "org.openmrs.OrderSet$Operator"))
+	@Column(nullable = false, length = 255)
 	private Operator operator;
 
+	@OneToMany(cascade = { CascadeType.MERGE, CascadeType.PERSIST }, fetch = FetchType.LAZY)
+	@JoinColumn(name = "order_set_id", nullable = false)
+	@OrderColumn(name = "sequence_number")
 	private List<OrderSetMember> orderSetMembers;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "category")
 	private Concept category;
 
 	/**

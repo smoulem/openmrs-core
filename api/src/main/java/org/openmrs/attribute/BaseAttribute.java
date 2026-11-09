@@ -15,8 +15,10 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
 
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.envers.Audited;
 import org.hibernate.search.mapper.pojo.mapping.definition.annotation.FullTextField;
+import org.hibernate.type.SqlTypes;
 import org.openmrs.BaseChangeableOpenmrsData;
 import org.openmrs.customdatatype.CustomDatatypeUtil;
 import org.openmrs.customdatatype.Customizable;
@@ -47,6 +49,7 @@ public abstract class BaseAttribute<AT extends AttributeType, OwningType extends
 
 	// value pulled from the database
 	@FullTextField
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
 	@Column(name = "value_reference", nullable = false, length = 65535)
 	private String valueReference;
 

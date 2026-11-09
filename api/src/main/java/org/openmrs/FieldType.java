@@ -9,21 +9,57 @@
  */
 package org.openmrs;
 
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
 import org.hibernate.envers.Audited;
 
 /**
  * FieldType
  */
 @Audited
+@Entity
+@Table(name = "field_type")
+@AttributeOverrides({ @AttributeOverride(name = "name", column = @Column(name = "name", length = 50)),
+        @AttributeOverride(name = "description", column = @Column(name = "description", length = 2147483647)) })
 public class FieldType extends BaseChangeableOpenmrsMetadata {
 
 	public static final long serialVersionUID = 35467L;
 
 	// Fields
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "field_type_id")
 	private Integer fieldTypeId;
 
+	@Column(name = "is_set", nullable = false)
 	private Boolean isSet = false;
+
+	@Transient
+	private Boolean retired;
+
+	@Transient
+	private java.util.Date dateRetired;
+
+	@Transient
+	private User retiredBy;
+
+	@Transient
+	private String retireReason;
+
+	@Transient
+	private User changedBy;
+
+	@Transient
+	private java.util.Date dateChanged;
 
 	// Constructors
 

@@ -17,6 +17,20 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.util.CollectionUtil;
 import org.openmrs.util.NaturalStrings;
@@ -25,6 +39,8 @@ import org.openmrs.util.NaturalStrings;
  * ProgramWorkflow
  */
 @Audited
+@Entity
+@Table(name = "program_workflow")
 public class ProgramWorkflow extends BaseChangeableOpenmrsMetadata {
 
 	private static final long serialVersionUID = 1L;
@@ -33,13 +49,37 @@ public class ProgramWorkflow extends BaseChangeableOpenmrsMetadata {
 	// Properties
 	// ******************
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "program_workflow_id")
 	private Integer programWorkflowId;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "program_id", nullable = false)
 	private Program program;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "concept_id", nullable = false)
 	private Concept concept;
 
+	@OneToMany(mappedBy = "programWorkflow", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+	@OrderBy("dateCreated ASC")
 	private Set<ProgramWorkflowState> states = new HashSet<>();
+
+	@Transient
+	private String name;
+
+	@Transient
+	private String description;
+
+	@Transient
+	private User retiredBy;
+
+	@Transient
+	private java.util.Date dateRetired;
+
+	@Transient
+	private String retireReason;
 
 	// ******************
 	// Constructors

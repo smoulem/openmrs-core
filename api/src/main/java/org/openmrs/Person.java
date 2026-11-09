@@ -23,10 +23,24 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import jakarta.persistence.Cacheable;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.Formula;
 import org.hibernate.envers.Audited;
 import org.hibernate.envers.NotAudited;
 import org.hibernate.search.mapper.pojo.mapping.definition.annotation.DocumentId;
@@ -53,6 +67,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 @Audited
 @Cacheable
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+@Entity
+@Table(name = "person")
 public class Person extends BaseChangeableOpenmrsData {
 
 	public static final long serialVersionUID = 2L;
@@ -60,53 +76,87 @@ public class Person extends BaseChangeableOpenmrsData {
 	private static final Logger log = LoggerFactory.getLogger(Person.class);
 
 	@DocumentId
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "person_id")
 	protected Integer personId;
 
+	@OneToMany(mappedBy = "person", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+	@OrderBy("voided ASC, preferred DESC, dateCreated DESC")
+	@BatchSize(size = 1000)
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<PersonAddress> addresses = null;
 
+	@OneToMany(mappedBy = "person", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+	@OrderBy("voided ASC, preferred DESC, dateCreated DESC")
+	@BatchSize(size = 1000)
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<PersonName> names = null;
 
+	@OneToMany(mappedBy = "person", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+	@OrderBy("voided ASC")
+	@BatchSize(size = 1000)
+	@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 	private Set<PersonAttribute> attributes = null;
 
 	@GenericField
+	@Column(length = 50)
 	private String gender;
 
 	@GenericField
+	@Column
 	private Date birthdate;
 
+	@Column
 	private Date birthtime;
 
+	@Column(name = "birthdate_estimated", nullable = false)
 	private Boolean birthdateEstimated = false;
 
+	@Column(name = "deathdate_estimated", nullable = false)
 	private Boolean deathdateEstimated = false;
 
 	@GenericField
+	@Column(nullable = false)
 	private Boolean dead = false;
 
+	@Column(name = "death_date")
 	private Date deathDate;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "cause_of_death")
 	private Concept causeOfDeath;
 
+	@Column(name = "cause_of_death_non_coded", length = 255)
 	private String causeOfDeathNonCoded;
 
+	@Transient
 	private User personCreator;
 
+	@Transient
 	private Date personDateCreated;
 
+	@Transient
 	private User personChangedBy;
 
+	@Transient
 	private Date personDateChanged;
 
+	@Transient
 	private Boolean personVoided = false;
 
+	@Transient
 	private User personVoidedBy;
 
+	@Transient
 	private Date personDateVoided;
 
+	@Transient
 	private String personVoidReason;
 
 	@GenericField
 	@NotAudited
+	@Formula("case when exists (select * from patient p where p.patient_id = person_id) then 1 else 0 end")
 	@IndexingDependency(derivedFrom = @ObjectPath(@PropertyValue(propertyName = "patient")))
 	private boolean isPatient;
 
@@ -1104,57 +1154,51 @@ public class Person extends BaseChangeableOpenmrsData {
 	}
 
 	public User getPersonChangedBy() {
-		return personChangedBy;
+		return getChangedBy();
 	}
 
 	public void setPersonChangedBy(User changedBy) {
-		this.personChangedBy = changedBy;
 		this.setChangedBy(changedBy);
 	}
 
 	public Date getPersonDateChanged() {
-		return personDateChanged;
+		return getDateChanged();
 	}
 
 	public void setPersonDateChanged(Date dateChanged) {
-		this.personDateChanged = dateChanged;
 		this.setDateChanged(dateChanged);
 	}
 
 	public User getPersonCreator() {
-		return personCreator;
+		return getCreator();
 	}
 
 	public void setPersonCreator(User creator) {
-		this.personCreator = creator;
 		this.setCreator(creator);
 	}
 
 	public Date getPersonDateCreated() {
-		return personDateCreated;
+		return getDateCreated();
 	}
 
 	public void setPersonDateCreated(Date dateCreated) {
-		this.personDateCreated = dateCreated;
 		this.setDateCreated(dateCreated);
 	}
 
 	public Date getPersonDateVoided() {
-		return personDateVoided;
+		return getDateVoided();
 	}
 
 	public void setPersonDateVoided(Date dateVoided) {
-		this.personDateVoided = dateVoided;
 		this.setDateVoided(dateVoided);
 	}
 
 	public void setPersonVoided(Boolean voided) {
-		this.personVoided = voided;
 		this.setVoided(voided);
 	}
 
 	public Boolean getPersonVoided() {
-		return personVoided;
+		return getVoided();
 	}
 
 	/**
@@ -1167,20 +1211,18 @@ public class Person extends BaseChangeableOpenmrsData {
 	}
 
 	public User getPersonVoidedBy() {
-		return personVoidedBy;
+		return getVoidedBy();
 	}
 
 	public void setPersonVoidedBy(User voidedBy) {
-		this.personVoidedBy = voidedBy;
 		this.setVoidedBy(voidedBy);
 	}
 
 	public String getPersonVoidReason() {
-		return personVoidReason;
+		return getVoidReason();
 	}
 
 	public void setPersonVoidReason(String voidReason) {
-		this.personVoidReason = voidReason;
 		this.setVoidReason(voidReason);
 	}
 

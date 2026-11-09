@@ -11,6 +11,13 @@ package org.openmrs;
 
 import java.util.Locale;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import org.hibernate.envers.Audited;
 import org.openmrs.api.context.Context;
 import org.springframework.util.StringUtils;
@@ -22,15 +29,22 @@ import org.springframework.util.StringUtils;
  * @since 1.8
  */
 @Audited
+@Entity
+@Table(name = "concept_stop_word")
 public class ConceptStopWord extends BaseOpenmrsObject {
 
 	private static final long serialVersionUID = 3671020002642184656L;
 
 	// Fields
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "concept_stop_word_id")
 	private Integer conceptStopWordId;
 
+	@Column(name = "word", nullable = false, length = 50)
 	private String value;
 
+	@Column(nullable = false, length = 20)
 	private Locale locale;
 
 	// Constructors

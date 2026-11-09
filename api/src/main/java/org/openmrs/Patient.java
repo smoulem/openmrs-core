@@ -16,10 +16,24 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.AssociationOverrides;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.AttributeOverrides;
 import jakarta.persistence.Cacheable;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Table;
 
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.SortNatural;
 import org.hibernate.envers.Audited;
 import org.openmrs.util.CollectionUtil;
 
@@ -32,14 +46,32 @@ import org.openmrs.util.CollectionUtil;
 @Audited
 @Cacheable
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+@Entity
+@Table(name = "patient")
+@PrimaryKeyJoinColumn(name = "patient_id")
+@AssociationOverrides({
+        @AssociationOverride(name = "creator", joinColumns = @JoinColumn(name = "creator", table = "patient", nullable = false)),
+        @AssociationOverride(name = "changedBy", joinColumns = @JoinColumn(name = "changed_by", table = "patient")),
+        @AssociationOverride(name = "voidedBy", joinColumns = @JoinColumn(name = "voided_by", table = "patient")) })
+@AttributeOverrides({
+        @AttributeOverride(name = "dateCreated", column = @Column(name = "date_created", table = "patient", nullable = false)),
+        @AttributeOverride(name = "dateChanged", column = @Column(name = "date_changed", table = "patient")),
+        @AttributeOverride(name = "voided", column = @Column(name = "voided", table = "patient", nullable = false)),
+        @AttributeOverride(name = "dateVoided", column = @Column(name = "date_voided", table = "patient")),
+        @AttributeOverride(name = "voidReason", column = @Column(name = "void_reason", table = "patient", length = 255)) })
 public class Patient extends Person {
 
 	public static final long serialVersionUID = 93123L;
 
+	@Column(name = "patient_id", insertable = false, updatable = false)
 	private Integer patientId;
 
+	@Column(name = "allergy_status", length = 50, nullable = false)
 	private String allergyStatus = Allergies.UNKNOWN;
 
+	@OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+	@SortNatural
+	@BatchSize(size = 1000)
 	private Set<PatientIdentifier> identifiers;
 
 	// Constructors

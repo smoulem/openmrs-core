@@ -31,12 +31,33 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+
 import org.apache.commons.lang3.StringUtils;
+import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.Parameter;
+import org.hibernate.annotations.Type;
 import org.hibernate.envers.Audited;
+import org.hibernate.type.SqlTypes;
 import org.openmrs.annotation.AllowDirectAccess;
 import org.openmrs.api.APIException;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.hibernate.HibernateUtil;
+import org.openmrs.api.db.hibernate.type.StringEnumType;
 import org.openmrs.obs.ComplexData;
 import org.openmrs.obs.ComplexObsHandler;
 import org.openmrs.util.CollectionUtil;
@@ -76,6 +97,9 @@ import org.slf4j.LoggerFactory;
  * @see Encounter
  */
 @Audited
+@Entity
+@Table(name = "obs")
+@BatchSize(size = 25)
 public class Obs extends BaseFormRecordableOpenmrsData {
 
 	/**
@@ -120,12 +144,19 @@ public class Obs extends BaseFormRecordableOpenmrsData {
 
 	private static final Logger log = LoggerFactory.getLogger(Obs.class);
 
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@Column(name = "obs_id")
 	protected Integer obsId;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "concept_id", nullable = false)
 	protected Concept concept;
 
+	@Column(name = "obs_datetime", nullable = false)
 	protected Date obsDatetime;
 
+	@Column(name = "accession_number", length = 255)
 	protected String accessionNumber;
 
 	/**
@@ -135,56 +166,97 @@ public class Obs extends BaseFormRecordableOpenmrsData {
 	 *
 	 * @see #isObsGrouping() (??)
 	 */
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "obs_group_id")
 	protected Obs obsGroup;
 
 	/**
 	 * The list of obs grouped under this obs.
 	 */
 	@AllowDirectAccess
+	@OneToMany(mappedBy = "obsGroup", cascade = CascadeType.REMOVE, fetch = FetchType.LAZY)
+	@OrderBy("obsId ASC")
+	@BatchSize(size = 25)
 	protected Set<Obs> groupMembers;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "value_coded")
 	protected Concept valueCoded;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "value_coded_name_id")
 	protected ConceptName valueCodedName;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "value_drug")
 	protected Drug valueDrug;
 
+	@Column(name = "value_group_id")
 	protected Integer valueGroupId;
 
+	@Column(name = "value_datetime")
 	protected Date valueDatetime;
 
+	@Column(name = "value_numeric")
 	protected Double valueNumeric;
 
+	@Column(name = "value_modifier", length = 2)
 	protected String valueModifier;
 
+	@JdbcTypeCode(SqlTypes.LONGVARCHAR)
+	@Column(name = "value_text", length = 65535)
 	protected String valueText;
 
+	@Column(name = "value_complex", length = 1000)
 	protected String valueComplex;
 
 	// ComplexData is not persisted in the database.
 	protected transient ComplexData complexData;
 
+	@Column(name = "comments", length = 255)
 	protected String comment;
 
-	protected transient Integer personId;
+	@Column(name = "person_id", insertable = false, updatable = false)
+	protected Integer personId;
 
+	@ManyToOne(optional = false, fetch = FetchType.LAZY)
+	@JoinColumn(name = "person_id", nullable = false)
 	protected Person person;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "order_id")
 	protected Order order;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "location_id")
 	protected Location location;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "encounter_id")
 	protected Encounter encounter;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "previous_version", unique = true)
 	private Obs previousVersion;
 
 	private Boolean dirty = Boolean.FALSE;
 
+	@Type(value = StringEnumType.class, parameters = @Parameter(name = "enumClass", value = "org.openmrs.Obs$Interpretation"))
+	@Column(length = 32)
 	private Interpretation interpretation;
 
+	@Type(value = StringEnumType.class, parameters = @Parameter(name = "enumClass", value = "org.openmrs.Obs$Status"))
+	@Column(nullable = false, length = 16)
 	private Status status = Status.FINAL;
 
+	@OneToOne(mappedBy = "obs", cascade = CascadeType.ALL)
 	private ObsReferenceRange referenceRange;
+
+	@Transient
+	private User changedBy;
+
+	@Transient
+	private Date dateChanged;
 
 	/** default constructor */
 	public Obs() {
